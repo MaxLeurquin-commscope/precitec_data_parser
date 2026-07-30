@@ -1,0 +1,3 @@
+include README.md
+include LICENSE
+recursive-include src/precitec_data_parser py.typed

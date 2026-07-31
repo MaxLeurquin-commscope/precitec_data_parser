@@ -24,13 +24,13 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering",
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "matplotlib>=3.11.1",
-    "numpy>=2.5.1",
+    "numpy>=1.26,<2.3",
     "pandas>=3.0.3",
     "scipy>=1.14.0",
     "surfalize[3d]>=0.18.0",
@@ -65,7 +65,7 @@ include = [
 
 [tool.black]
 line-length = 100
-target-version = ["py313"]
+target-version = ["py311"]
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -83,7 +83,7 @@ extend-exclude = '''
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py311"
 exclude = [".git", "__pycache__", "build", "dist"]
 
 [tool.ruff.lint]
@@ -91,7 +91,7 @@ select = ["E", "F", "W", "I", "UP"]
 ignore = ["E501"]  # line-too-long; handled by black
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

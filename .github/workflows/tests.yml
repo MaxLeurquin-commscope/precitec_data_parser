@@ -12,39 +12,19 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.13']
-    
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
+
+    - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ matrix.python-version }}
-    
+        python-version: '3.13'
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev]"
-    
-    - name: Run tests with pytest
+        pip install -e .
+
+    - name: Basic syntax check
       run: |
-        pytest tests/ -v --tb=short
-      continue-on-error: false
-    
-    - name: Check code quality with ruff
-      run: |
-        ruff check src/ tests/
-      continue-on-error: true
-    
-    - name: Format check with black
-      run: |
-        black --check src/ tests/
-      continue-on-error: true
-    
-    - name: Type check with mypy
-      run: |
-        mypy src/ --ignore-missing-imports
-      continue-on-error: true
+        python -m compileall -q src

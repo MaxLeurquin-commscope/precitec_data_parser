@@ -11,7 +11,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from scipy import ndimage
 from types import SimpleNamespace
-from surfalize import Profile
+from surfalize import Profile, Surface
 from pathlib import Path
 from .data_parser import PrecitecData
 
@@ -19,8 +19,9 @@ from .data_parser import PrecitecData
 class PrecitecSurfaceAnalyzer:
     """3D surface and profile analysis for parsed `PrecitecData`, backed by `surfalize`.
 
-    Wraps the height data in a `surfalize.Surface`, giving access to ISO 25178
-    areal roughness/height parameters, 2D/3D surface plotting, and extraction of
+    Wraps one signal of the measurement (altitude by default, or intensity) in a
+    `surfalize.Surface`, giving access to ISO 25178 areal roughness/height
+    parameters, 2D/3D surface plotting, and extraction of
     horizontal/vertical/oblique `surfalize.Profile` cuts (with ISO 4287 profile
     parameters such as Ra, Rq, Rz).
 
@@ -34,25 +35,51 @@ class PrecitecSurfaceAnalyzer:
     since several definitions assume square pixels; they are out of scope here.
 
     Example:
-        with PrecitecData("altitude.csv") as data:
-            analyzer = PrecitecSurfaceAnalyzer(data)
-            print(analyzer.height_parameters())
-            profile = analyzer.horizontal_profile(y=data.y[len(data.y) // 2])
-            print(profile.roughness_parameters())
-            analyzer.plot_3d(savepath="surface_3d.png")
+        data = PrecitecData("altitude.csv", "intensity.csv")
+        analyzer = PrecitecSurfaceAnalyzer(data)
+        print(analyzer.height_parameters())
+        profile = analyzer.horizontal_profile(y=data.y[len(data.y) // 2])
+        print(profile.roughness_parameters())
+        analyzer.plot_3d(savepath="surface_3d.png")
+
+        # Analyze the intensity channel instead:
+        PrecitecSurfaceAnalyzer(data, signal="intensity").plot_2d()
 
     Parameters
     ----------
     data : PrecitecData
         Parsed measurement to analyze.
+    signal : str, default "altitude"
+        Which signal to wrap - "altitude" (topology) or "intensity" (reflectance).
     fill_nonmeasured : bool, default True
-        Interpolate zero (no-measurement) samples before analysis; surfalize
-        treats NaN as non-measured and would otherwise skew ISO parameters.
+        Interpolate non-measured samples when computing areal ISO parameters;
+        surfalize treats NaN as non-measured and would otherwise skew them. This
+        never affects plotting or profiles - those always leave non-measured
+        points blank. Non-measured points are shared across signals and defined
+        by the altitude channel.
     """
 
-    def __init__(self, data: PrecitecData, fill_nonmeasured: bool = True):
+    def __init__(self, data: PrecitecData, signal: str = "altitude", fill_nonmeasured: bool = True):
         self.data = data
-        self.surface = data.to_surface(fill_nonmeasured)
+        self.signal = signal.strip().lower()
+        self.fill_nonmeasured = fill_nonmeasured
+        # Kept unfilled so non-measured points stay NaN and render blank in
+        # plots/profiles instead of showing interpolated heights.
+        self.surface = data.to_surface(fill_nonmeasured=False, signal=self.signal)
+        self._filled_surface: Surface | None = None
+
+    @property
+    def _filled(self) -> Surface:
+        """Surface with non-measured points interpolated (built once, on demand)."""
+        if self._filled_surface is None:
+            self._filled_surface = self.data.to_surface(fill_nonmeasured=True, signal=self.signal)
+        return self._filled_surface
+
+    @property
+    def analysis_surface(self) -> Surface:
+        """Surface used for areal ISO parameters, with non-measured points filled
+        when `fill_nonmeasured` is set (see class docstring)."""
+        return self._filled if self.fill_nonmeasured else self.surface
 
     def horizontal_profile(self, y: float, **kwargs) -> Profile:
         """Extract a horizontal (constant-y) profile at position `y` (µm).
@@ -107,7 +134,10 @@ class PrecitecSurfaceAnalyzer:
         `scipy.ndimage.map_coordinates` (cubic-spline interpolation) to read
         values, because an oblique line practically never lands exactly on
         grid points - unlike `horizontal_profile`/`vertical_profile`, which
-        read existing rows/columns with no interpolation.
+        read existing rows/columns with no interpolation. Because that spline
+        prefilter would smear NaN across the whole line, values are sampled
+        from the non-measured-filled surface and the samples that fall on
+        non-measured points are then blanked back to NaN.
         """
         surface = self.surface
         if not (0 <= x0 <= surface.width_um and 0 <= x1 <= surface.width_um):
@@ -128,7 +158,12 @@ class PrecitecSurfaceAnalyzer:
 
         xp = np.linspace(x0px, x1px, n_samples)
         yp = np.linspace(y0px, y1px, n_samples)
-        data = ndimage.map_coordinates(surface.data, [yp, xp])
+        data = ndimage.map_coordinates(self._filled.data, [yp, xp])
+        # Blank samples touching non-measured data (order=1 flags any contribution).
+        touched_nonmeasured = ndimage.map_coordinates(
+            self.data.nonmeasured.astype(float), [yp, xp], order=1
+        )
+        data[touched_nonmeasured > 0] = np.nan
 
         step = length_um / (n_samples - 1)
         profile = Profile(data, step, length_um)
@@ -208,11 +243,11 @@ class PrecitecSurfaceAnalyzer:
 
     def roughness_parameters(self, parameters: list[str] | None = None) -> dict[str, float]:
         """ISO 25178 areal roughness parameters (Sa, Sq, Sz, Sdr, ... by default all)."""
-        return self.surface.roughness_parameters(parameters)
+        return self.analysis_surface.roughness_parameters(parameters)
 
     def height_parameters(self) -> dict[str, float]:
         """ISO 25178 areal height parameters (Sa, Sq, Sz, Sv, Sp, Ssk, Sku)."""
-        return self.surface.height_parameters()
+        return self.analysis_surface.height_parameters()
 
     def plot_3d(self, savepath: str | Path | None = None, **kwargs):
         """Render the surface as a 3D shaded plot, optionally saving it.

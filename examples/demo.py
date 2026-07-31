@@ -20,8 +20,6 @@ if __name__ == "__main__":
     # Update these paths to your Precitec measurement pair (.csv or .bcrf)
     altitude_path = rf"precitec_data_parser\tests\sample_data\dummy_Altitude_Peak_Processed.csv"
     intensity_path = rf"precitec_data_parser\tests\sample_data\dummy_Intensity_Peak_Processed.csv"
-
-    
     
 
     data = PrecitecData(altitude_path, intensity_path)
@@ -33,7 +31,7 @@ if __name__ == "__main__":
 
     print(f"Available signals: {[k for k, v in data.signals.items() if v is not None]}")
 
-    analyzer = PrecitecSurfaceAnalyzer(data)
+    analyzer = PrecitecSurfaceAnalyzer(data, level=True)
 
     print("=== Plotting 2D altitude map ===")
     analyzer.plot_2d(show=True)

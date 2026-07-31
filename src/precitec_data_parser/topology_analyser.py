@@ -51,6 +51,9 @@ class PrecitecSurfaceAnalyzer:
         Parsed measurement to analyze.
     signal : str, default "altitude"
         Which signal to wrap - "altitude" (topology) or "intensity" (reflectance).
+    level : bool, default True
+        Subtract the least-squares tilt plane (fitted from measured points only)
+        so a tilted sample does not bias roughness/height parameters or profiles.
     fill_nonmeasured : bool, default True
         Interpolate non-measured samples when computing areal ISO parameters;
         surfalize treats NaN as non-measured and would otherwise skew them. This
@@ -59,20 +62,34 @@ class PrecitecSurfaceAnalyzer:
         by the altitude channel.
     """
 
-    def __init__(self, data: PrecitecData, signal: str = "altitude", fill_nonmeasured: bool = True):
+    def __init__(
+        self,
+        data: PrecitecData,
+        signal: str = "altitude",
+        level: bool = True,
+        fill_nonmeasured: bool = True,
+    ):
         self.data = data
         self.signal = signal.strip().lower()
         self.fill_nonmeasured = fill_nonmeasured
         # Kept unfilled so non-measured points stay NaN and render blank in
         # plots/profiles instead of showing interpolated heights.
         self.surface = data.to_surface(fill_nonmeasured=False, signal=self.signal)
+        if level:
+            self.surface = self.surface.level()
         self._filled_surface: Surface | None = None
 
     @property
     def _filled(self) -> Surface:
-        """Surface with non-measured points interpolated (built once, on demand)."""
+        """Surface with non-measured points interpolated (built once, on demand).
+
+        Derived from `self.surface` so it inherits its tilt correction.
+        """
         if self._filled_surface is None:
-            self._filled_surface = self.data.to_surface(fill_nonmeasured=True, signal=self.signal)
+            self._filled_surface = (
+                self.surface.fill_nonmeasured()
+                if self.surface.has_missing_points else self.surface
+            )
         return self._filled_surface
 
     @property

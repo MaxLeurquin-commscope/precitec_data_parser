@@ -1,53 +1,72 @@
-"""Test suite for PrecitecData and PrecitecSurfaceAnalyzer."""
-import os
-import sys
+"""Unit tests for PrecitecData and PrecitecSurfaceAnalyzer."""
+import pytest
+import numpy as np
 from pathlib import Path
-
-# Add src to path for imports
-src_path = Path(__file__).parent.parent / "src"
-sys.path.insert(0, str(src_path))
+from unittest.mock import patch, MagicMock
 
 from precitec_data_parser import PrecitecData, PrecitecSurfaceAnalyzer
 
 
-if __name__ == "__main__":
-    my_data=rf"C:\Users\ML1192\OneDrive - CommScope\Documents\my_data\Precitec_Setup\DATA\marseille\grooves\grooves_Altitude_Peak_1_Processed_26_06_02_14_07_47.csv" #.bcrf also works
-   
+class TestPrecitecData:
+    """Tests for PrecitecData class."""
 
-    with PrecitecData(my_data) as data:
-        print(data.metadata)
-        data.plot_data(show=True)
+    def test_imports(self):
+        """Test that main classes can be imported."""
+        from precitec_data_parser import PrecitecData, PrecitecSurfaceAnalyzer
+        assert PrecitecData is not None
+        assert PrecitecSurfaceAnalyzer is not None
 
-        analyzer = PrecitecSurfaceAnalyzer(data)
+    def test_unsupported_format(self):
+        """Test that unsupported file formats raise NotImplementedError."""
+        with pytest.raises(NotImplementedError, match="Only .csv and .bcrf exports are supported"):
+            PrecitecData("test.txt")
 
-        y_pos=data.y[len(data.y) // 2]
-        print(f"{y_pos=}")
-        profile_y = analyzer.horizontal_profile(y=y_pos)
-        profile_x= analyzer.vertical_profile(x=data.x[len(data.x) // 2 +100])
-        profile_oblique = analyzer.oblique_profile(
-            x0=data.x[0], y0=data.y[0], x1=data.x[-1], y1=data.y[-1]
-        )
 
-        # plot_profile shows the profile alongside the top-down 2D map by
-        # default, with a red line marking where the profile was cut from.
-        # filter_profile demo: gaussian smooths the whole signal, hampel only
-        # replaces individual outlier spikes.
-        gaussian_x = analyzer.filter_profile(profile_x, method="gaussian", filter_args={"cutoff": 100})
-        hampel_x = analyzer.filter_profile(profile_x, method="hampel", filter_args={"window_size": 5, "n_sigmas": 1.0})
-        analyzer.plot_profile(profile_x, filtered=gaussian_x, show=True)
-        analyzer.plot_profile(profile_x, filtered=hampel_x, show=True)
+class TestPrecitecSurfaceAnalyzer:
+    """Tests for PrecitecSurfaceAnalyzer class."""
 
-        filtered_x = analyzer.filter_profile(profile_x, filter_args={"cutoff": 50})
-        filtered_oblique = analyzer.filter_profile(profile_oblique, filter_args={"cutoff": 50})
-        analyzer.plot_profile(profile_x, show=True, filtered=filtered_x)
-        analyzer.plot_profile(profile_oblique, show=True, filtered=filtered_oblique)
+    @pytest.fixture
+    def mock_precitec_data(self):
+        """Create a mock PrecitecData object for testing."""
+        mock_data = MagicMock(spec=PrecitecData)
+        mock_data.x = np.linspace(0, 100, 50)
+        mock_data.y = np.linspace(0, 100, 50)
+        mock_data.z = np.random.rand(50, 50)
+        mock_data.metadata = {"test": "data"}
+        
+        # Mock the surface
+        mock_surface = MagicMock()
+        mock_surface.width_um = 100.0
+        mock_surface.height_um = 100.0
+        mock_surface.step_x = 2.0
+        mock_surface.step_y = 2.0
+        mock_data.to_surface.return_value = mock_surface
+        
+        return mock_data
 
-        # An oblique profile that does NOT start at (0, 0), to demonstrate
-        # that it is still extracted correctly (surfalize's own
-        # get_oblique_profile would silently get this one wrong).
-        profile_oblique_offset = analyzer.oblique_profile(
-            x0=data.x[len(data.x) // 4], y0=data.y[len(data.y) // 4],
-            x1=data.x[3 * len(data.x) // 4], y1=data.y[3 * len(data.y) // 4],
+    def test_analyzer_initialization(self, mock_precitec_data):
+        """Test that analyzer can be initialized with PrecitecData."""
+        analyzer = PrecitecSurfaceAnalyzer(mock_precitec_data)
+        assert analyzer.data == mock_precitec_data
+        assert analyzer.surface is not None
+
+    def test_filter_profile_method_validation(self, mock_precitec_data):
+        """Test that invalid filter methods raise ValueError."""
+        analyzer = PrecitecSurfaceAnalyzer(mock_precitec_data)
+        mock_profile = MagicMock()
+        
+        with pytest.raises(ValueError, match='Unknown filter method'):
+            analyzer.filter_profile(mock_profile, method="invalid_method")
+
+
+class TestPackageVersion:
+    """Tests for package version."""
+
+    def test_version_exists(self):
+        """Test that __version__ is defined."""
+        import precitec_data_parser
+        assert hasattr(precitec_data_parser, '__version__')
+        assert isinstance(precitec_data_parser.__version__, str)
         )
         analyzer.plot_profile(profile_oblique_offset, show=True)
 

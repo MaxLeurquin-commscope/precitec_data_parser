@@ -11,7 +11,7 @@ from precitec_data_parser import PrecitecData, PrecitecSurfaceAnalyzer
 
 
 if __name__ == "__main__":
-    my_data="my_precitec_measurement_file.csv" #.bcrf also works
+    my_data=rf"C:\Users\ML1192\OneDrive - CommScope\Documents\my_data\Precitec_Setup\DATA\marseille\grooves\grooves_Altitude_Peak_1_Processed_26_06_02_14_07_47.csv" #.bcrf also works
    
 
     with PrecitecData(my_data) as data:

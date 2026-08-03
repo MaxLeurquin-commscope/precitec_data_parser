@@ -84,16 +84,17 @@ class PrecitecData:
     def _parse(cls, path: Path) -> tuple[dict[str, Any], np.ndarray, float, float]:
         """Parse a single export into (metadata, z, xstep, ystep)."""
         suffix = path.suffix.lower()
-        if suffix == ".csv":
-            metadata, z, xstep, ystep = cls._parse_csv(path)
-        elif suffix == ".bcrf":
-            metadata, z, xstep, ystep = cls._parse_bcrf(path)
-        else:
-            raise NotImplementedError(
-                f"Only .csv and .bcrf exports are supported, got '{path.suffix}'. "
-                "The MountainsMap .mnt format stores its surface data in an "
-                "undocumented, proprietary binary blob."
-            )
+        match suffix:
+            case ".csv":
+                metadata, z, xstep, ystep = cls._parse_csv(path)
+            case ".bcrf":
+                metadata, z, xstep, ystep = cls._parse_bcrf(path)
+            case _:
+                raise NotImplementedError(
+                    f"Only .csv and .bcrf exports are supported, got '{path.suffix}'. "
+                    "The MountainsMap .mnt format stores its surface data in an "
+                    "undocumented, proprietary binary blob."
+                )
         metadata["Signal"] = _decode_signal(metadata)
         return metadata, z, xstep, ystep
 

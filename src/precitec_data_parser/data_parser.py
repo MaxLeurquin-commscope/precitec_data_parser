@@ -12,6 +12,12 @@ import numpy as np
 import pandas as pd
 from surfalize import Surface
 
+# BCRF physical lengths are in mm regardless of the reported unit.
+_UM_PER_MM = 1000.0
+
+# Precitec signal identifier (CSV "IdSignal" / BCRF "signal_id") to signal name.
+_SIGNAL_BY_ID: dict[int, str] = {16640: "altitude", 16641: "intensity"}
+
 
 def _convert_value(value: str) -> Any:
     """Convert a raw metadata string to int, float or bool where possible."""
@@ -24,14 +30,6 @@ def _convert_value(value: str) -> Any:
     except ValueError:
         pass
     return {"True": True, "False": False}.get(value, value)
-
-
-# BCRF physical lengths are in mm regardless of the reported unit.
-_UM_PER_MM = 1000.0
-
-# Precitec signal identifier (CSV "IdSignal" / BCRF "signal_id") to signal name.
-_SIGNAL_BY_ID: dict[int, str] = {16640: "altitude", 16641: "intensity"}
-
 
 class PrecitecData:
     """Parse a Precitec measurement pair (altitude + intensity) into one object.

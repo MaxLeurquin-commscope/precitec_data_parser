@@ -33,6 +33,11 @@ jobs:
       
     - name: Show artifacts
       run: ls -lah dist
+
+    - name: Debug checkout
+      run: |
+        git describe --tags --always
+        grep '^version' pyproject.toml
       
     - name: Check distribution
       run: twine check dist/*

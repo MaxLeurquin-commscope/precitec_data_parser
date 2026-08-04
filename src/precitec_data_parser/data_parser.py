@@ -6,7 +6,7 @@ Description: parse Precitec CLS2 exports (.csv or .bcrf) into altitude/intensity
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -31,14 +31,6 @@ _UM_PER_MM = 1000.0
 
 # Precitec signal identifier (CSV "IdSignal" / BCRF "signal_id") to signal name.
 _SIGNAL_BY_ID: dict[int, str] = {16640: "altitude", 16641: "intensity"}
-
-
-def _decode_signal(metadata: dict[str, Any]) -> str | None:
-    """Return 'altitude'/'intensity' from the metadata's signal id, else None."""
-    try:
-        return _SIGNAL_BY_ID.get(int(metadata.get("IdSignal", metadata.get("signal_id"))))
-    except (TypeError, ValueError):
-        return None
 
 
 class PrecitecData:
@@ -95,8 +87,73 @@ class PrecitecData:
                     "The MountainsMap .mnt format stores its surface data in an "
                     "undocumented, proprietary binary blob."
                 )
-        metadata["Signal"] = _decode_signal(metadata)
+        metadata["Signal"] = cls._decode_signal(metadata)
         return metadata, z, xstep, ystep
+
+    @staticmethod
+    def _decode_signal(metadata: dict[str, Any]) -> Literal["altitude", "intensity"] | None:
+        """Return 'altitude'/'intensity' from the metadata's signal id, else None."""
+        signal_id = metadata.get("IdSignal") or metadata.get("signal_id")
+        if signal_id is None:
+            return None
+        try:
+            result = _SIGNAL_BY_ID.get(int(signal_id))
+            return cast(Literal["altitude", "intensity"] | None, result)
+        except (TypeError, ValueError):
+            return None
+   
+
+    @staticmethod
+    def id_signal_from_path(filepath:Path) -> Literal["altitude", "intensity"] | None:
+        """
+        Given a file path decode the metadata from it and returns whether it is an altitude or intensity signal
+        """
+        suffix=filepath.suffix.lower()
+        match suffix:
+            case ".csv":
+                return PrecitecData._decode_signal(PrecitecData._read_csv_metadata(filepath))
+            case ".bcrf":
+                return PrecitecData._decode_signal(PrecitecData._read_bcrf_header(filepath))
+            case _:
+                raise NotImplementedError(
+                    f"Only .csv and .bcrf exports are supported, got '{suffix}'. "
+                    "The MountainsMap .mnt format stores its surface data in an "
+                    "undocumented, proprietary binary blob."
+                )
+
+    @classmethod
+    def from_folder(cls, folder:Path,filetype:Literal["csv","bcrf"]) -> PrecitecData:
+        """
+        Given a folder, find the altitude and intensity files in it and create a PrecitecData object from them
+        The folder should only contain the measurement files of a single measurement 
+        (so 2 csv files or 2 bcrf files or all of them (other file extensions are ignored))
+        folder: the folder containing the files
+        filetype: the type of files to use
+        """
+        altitude_path: Path | None = None
+        intensity_path: Path | None = None
+        relevant_files=[file for file in folder.iterdir() if file.suffix.lower()==f".{filetype}"]
+        for file in relevant_files:
+            file_category=PrecitecData.id_signal_from_path(file)
+            match file_category:
+                case "altitude":
+                    altitude_path=Path(file)
+                case "intensity":
+                    intensity_path=Path(file)
+        if altitude_path is None or intensity_path is None:
+            raise ValueError(
+                f"Could not find both altitude and intensity files in '{folder}' "
+                f"with extension '.{filetype}'."
+            )
+        return cls(altitude_path, intensity_path)
+
+    def __repr__(self) -> str:
+        return (
+            f"PrecitecData(altitude_path={self.altitude_path}, "
+            f"intensity_path={self.intensity_path}, "
+            f"xstep={self.xstep}, ystep={self.ystep}, "
+            f"shape={self.altitude.shape})"
+        )
 
     @staticmethod
     def _read_csv_metadata(path: Path) -> dict[str, Any]:
@@ -178,15 +235,17 @@ class PrecitecData:
         ystep = float(fields["ylength"]) * um_per_unit[fields["yunit"]] / ypixels
         return fields, z, xstep, ystep
 
-    def signal_data(self, signal: str = "altitude") -> np.ndarray:
+    def signal_data(self, signal: Literal["altitude", "intensity"]) -> np.ndarray:
         """Return the altitude or intensity matrix."""
         try:
             return self.signals[signal.strip().lower()]
         except KeyError:
             raise KeyError("Signal must be 'altitude' or 'intensity'.") from None
 
-    def to_surface(self, fill_nonmeasured: bool = True, signal: str = "altitude") -> Surface:
+    def to_surface(self, signal:Literal["altitude", "intensity"],fill_nonmeasured: bool = True, ) -> Surface:
         """Convert the altitude or intensity data to a surfalize Surface.
+
+        signal: whether to use the altitude or intensity surface
 
         Non-measured points are always marked as NaN (surfalize renders them
         blank and excludes them from ISO parameters). `fill_nonmeasured` only
@@ -194,10 +253,9 @@ class PrecitecData:
         enable it for areal roughness/height parameters, leave it off to keep
         the holes empty when plotting.
         """
-        signal_key = signal.strip().lower()
-        z = self.signal_data(signal_key).astype(float)
+        z = self.signal_data(signal).astype(float)
         z[self.nonmeasured] = np.nan
-        metadata = self.metadata_altitude if signal_key == "altitude" else self.metadata_intensity
+        metadata = self.metadata_altitude if signal == "altitude" else self.metadata_intensity
 
         surface = Surface(z, self.xstep, self.ystep, metadata=metadata)
         if fill_nonmeasured and surface.has_missing_points:

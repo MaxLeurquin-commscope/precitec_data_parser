@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "precitec-data-parser"
-version = "0.3.0"
+version = "0.3.2"
 description = "Parse and analyze height-map exports from Precitec CLS2 sensors (.csv and .bcrf formats)"
 readme = "README.md"
 license = {text = "MIT"}
@@ -30,23 +30,10 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "matplotlib>=3.11.1",
-    "numpy>=1.26,<2.3",
+    "numpy>=2.4.6",
     "pandas>=3.0.3",
     "scipy>=1.14.0",
     "surfalize[3d]>=0.18.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "black>=23.0",
-    "ruff>=0.1.0",
-    "mypy>=1.0",
-]
-docs = [
-    "sphinx>=6.0",
-    "sphinx-rtd-theme>=1.2",
 ]
 
 [project.urls]

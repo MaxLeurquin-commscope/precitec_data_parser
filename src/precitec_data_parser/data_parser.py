@@ -1,5 +1,5 @@
 """
-Author: Maxime Leurquin
+Author: Maxime Leurquin.
 Date: July 2026
 Description: parse Precitec CLS2 exports (.csv or .bcrf) into altitude/intensity arrays.
 """

@@ -29,11 +29,11 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "matplotlib"
-    "numpy"
-    "pandas"
-    "scipy"
-    "surfalize[3d]"
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "scipy",
+    "surfalize[3d]",
 ]
 
 [project.urls]

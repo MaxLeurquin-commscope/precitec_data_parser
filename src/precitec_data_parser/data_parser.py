@@ -102,10 +102,10 @@ class PrecitecData:
 
 
     @classmethod
-    def find_file_pairs(cls,folder: Path, filetype: Literal["csv", "bcrf"]) -> list[tuple[Path, Path]]:
+    def find_file_pairs(cls,filepaths:list[str]) -> list[tuple[Path, Path]]:
         """
-        Given a folder, find all the files of the given filetype in it.
-        Then identify the altitude/intensity file pairs and create a list of (altitude_path, intensity_path) tuples from them.
+        Given a list of filepaths identify the altitude/intensity file pairs and 
+        create a list of (altitude_path, intensity_path) tuples from them.
         
         File pairs are identified by having the same base name when ignoring the altitude or intensity suffixes.
         For example:
@@ -114,12 +114,13 @@ class PrecitecData:
         
         altitude or intensity suffixes are case-insensitive.
         Raises:
+            - finds multiple altitude or intensity files for the same base name (happens if filepaths contains both .csv and .bcrf for the same measurement).
             - finds any altitude file without a corresponding intensity file, or vice versa.
             - finds a file named with altitude or intensity but the metadata indicates the opposite signal type.
         """
         altitude_files, intensity_files = {},{}
         
-        files = [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() == f".{filetype}"]
+        files = [Path(f) for f in filepaths if Path(f).is_file()]
         for file in files:
             # Extract base name by removing altitude/intensity suffix (case-insensitive)
             stem = file.stem
@@ -148,7 +149,10 @@ class PrecitecData:
             # Store in appropriate dict
             target_dict = altitude_files if signal_type == "altitude" else intensity_files
             if base_name in target_dict:
-                raise ValueError(f"Duplicate {signal_type} file for base name '{base_name}'.")
+                raise ValueError(
+                    f"Duplicate {signal_type} file for base name '{base_name}'. "
+                    f"You probably provided both .csv and .bcrf for the same measurement."
+                )
             target_dict[base_name] = file
         
         # Validate pairing
@@ -163,6 +167,14 @@ class PrecitecData:
         if missing_altitude:
             raise ValueError(f"Missing altitude files for: {', '.join(sorted(missing_altitude))}.")
         return [(altitude_files[key], intensity_files[key]) for key in sorted(altitude_keys)]
+
+
+    @classmethod
+    def from_file_pairs(cls, file_pairs: list[tuple[str | Path, str | Path]]) -> list[PrecitecData]:
+        """
+        Given a list of (altitude_path, intensity_path) tuples, create a list of PrecitecData objects from them.
+        """
+        return [cls(altitude, intensity) for altitude, intensity in file_pairs]
 
     @classmethod
     def from_folder(cls, folder: Path, filetype: Literal["csv", "bcrf"]) -> list[PrecitecData]:

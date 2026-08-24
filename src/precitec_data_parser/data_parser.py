@@ -70,6 +70,18 @@ class PrecitecData:
         self.x = np.arange(n_samples) * xstep
         self.y = np.arange(n_channels) * ystep
 
+    @staticmethod
+    def _decode_signal(metadata: dict[str, Any]) -> Literal["altitude", "intensity"] | None:
+        """Return 'altitude'/'intensity' from the metadata's signal id, else None."""
+        signal_id = metadata.get("IdSignal") or metadata.get("signal_id")
+        if signal_id is None:
+            return None
+        try:
+            result = _SIGNAL_BY_ID.get(int(signal_id))
+            return cast(Literal["altitude", "intensity"] | None, result)
+        except (TypeError, ValueError):
+            return None
+        
     @classmethod
     def _parse(cls, path: Path) -> tuple[dict[str, Any], np.ndarray, float, float]:
         """Parse a single export into (metadata, z, xstep, ystep)."""
@@ -88,62 +100,72 @@ class PrecitecData:
         metadata["Signal"] = cls._decode_signal(metadata)
         return metadata, z, xstep, ystep
 
-    @staticmethod
-    def _decode_signal(metadata: dict[str, Any]) -> Literal["altitude", "intensity"] | None:
-        """Return 'altitude'/'intensity' from the metadata's signal id, else None."""
-        signal_id = metadata.get("IdSignal") or metadata.get("signal_id")
-        if signal_id is None:
-            return None
-        try:
-            result = _SIGNAL_BY_ID.get(int(signal_id))
-            return cast(Literal["altitude", "intensity"] | None, result)
-        except (TypeError, ValueError):
-            return None
-   
-
-    @staticmethod
-    def id_signal_from_path(filepath:Path) -> Literal["altitude", "intensity"] | None:
-        """
-        Given a file path decode the metadata from it and returns whether it is an altitude or intensity signal
-        """
-        suffix=filepath.suffix.lower()
-        match suffix:
-            case ".csv":
-                return PrecitecData._decode_signal(PrecitecData._read_csv_metadata(filepath))
-            case ".bcrf":
-                return PrecitecData._decode_signal(PrecitecData._read_bcrf_header(filepath))
-            case _:
-                raise NotImplementedError(
-                    f"Only .csv and .bcrf exports are supported, got '{suffix}'. "
-                    "The MountainsMap .mnt format stores its surface data in an "
-                    "undocumented, proprietary binary blob."
-                )
-
     @classmethod
-    def from_folder(cls, folder:Path,filetype:Literal["csv","bcrf"]) -> PrecitecData:
+    def from_folder(cls, folder: Path, filetype: Literal["csv", "bcrf"]) -> list[PrecitecData]:
         """
-        Given a folder, find the altitude and intensity files in it and create a PrecitecData object from them
-        The folder should only contain the measurement files of a single measurement 
-        (so 2 csv files or 2 bcrf files or all of them (other file extensions are ignored))
-        folder: the folder containing the files
-        filetype: the type of files to use
+        Given a folder, find all the files of the given filetype in it.
+        Then identify the file pairs and create a list of PrecitecData objects from them.
+
+        File pairs are identified by having the same base name, but with altitude or intensity suffixes. 
+        For example:
+         - "measurement1_altitude.csv" and "measurement1_intensity.csv".
+         - "measurement2_100khz_altitude.bcrf" and "measurement2_intensity_100khz.bcrf".
+        
+        filename suffixes are case-insensitive.
+        Raises:
+          - finds any altitude file without a corresponding intensity file, or vice versa.
+          - finds a file named with altitude or intensity but the metadata indicates the opposite signal type.
         """
-        altitude_path: Path | None = None
-        intensity_path: Path | None = None
-        relevant_files=[file for file in folder.iterdir() if file.suffix.lower()==f".{filetype}"]
-        for file in relevant_files:
-            file_category=PrecitecData.id_signal_from_path(file)
-            match file_category:
-                case "altitude":
-                    altitude_path=Path(file)
-                case "intensity":
-                    intensity_path=Path(file)
-        if altitude_path is None or intensity_path is None:
-            raise ValueError(
-                f"Could not find both altitude and intensity files in '{folder}' "
-                f"with extension '.{filetype}'."
-            )
-        return cls(altitude_path, intensity_path)
+        altitude_files = {}
+        intensity_files = {}
+        
+        # Filter files by extension
+        files = [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() == f".{filetype}"]
+        
+        for file in files:
+            # Extract base name by removing altitude/intensity suffix (case-insensitive)
+            stem = file.stem
+            stem_lower = stem.lower()
+            
+            if "_altitude" in stem_lower:
+                idx = stem_lower.index("_altitude")
+                base_name = stem[:idx] + stem[idx + len("_altitude"):]
+                signal_type = "altitude"
+            elif "_intensity" in stem_lower:
+                idx = stem_lower.index("_intensity")
+                base_name = stem[:idx] + stem[idx + len("_intensity"):]
+                signal_type = "intensity"
+            else:
+                raise ValueError(f"File '{file.name}' missing '_altitude' or '_intensity' in name.")
+            
+            # Verify metadata matches filename
+            metadata, _, _, _ = cls._parse(file)
+            actual_signal = metadata.get("Signal")
+            if actual_signal != signal_type:
+                raise ValueError(
+                    f"File '{file.name}': filename indicates {signal_type} "
+                    f"but metadata indicates {actual_signal}."
+                )
+            
+            # Store in appropriate dict
+            target_dict = altitude_files if signal_type == "altitude" else intensity_files
+            if base_name in target_dict:
+                raise ValueError(f"Duplicate {signal_type} file for base name '{base_name}'.")
+            target_dict[base_name] = file
+        
+        # Validate pairing
+        altitude_keys = set(altitude_files.keys())
+        intensity_keys = set(intensity_files.keys())
+        
+        missing_intensity = altitude_keys - intensity_keys
+        missing_altitude = intensity_keys - altitude_keys
+        
+        if missing_intensity:
+            raise ValueError(f"Missing intensity files for: {', '.join(sorted(missing_intensity))}.")
+        if missing_altitude:
+            raise ValueError(f"Missing altitude files for: {', '.join(sorted(missing_altitude))}.")
+        
+        return [cls(altitude_files[key], intensity_files[key]) for key in sorted(altitude_keys)]
 
     def __repr__(self) -> str:
         return (

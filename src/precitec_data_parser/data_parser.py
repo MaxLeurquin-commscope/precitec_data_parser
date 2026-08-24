@@ -100,28 +100,26 @@ class PrecitecData:
         metadata["Signal"] = cls._decode_signal(metadata)
         return metadata, z, xstep, ystep
 
+
     @classmethod
-    def from_folder(cls, folder: Path, filetype: Literal["csv", "bcrf"]) -> list[PrecitecData]:
+    def find_file_pairs(cls,folder: Path, filetype: Literal["csv", "bcrf"]) -> list[tuple[Path, Path]]:
         """
         Given a folder, find all the files of the given filetype in it.
-        Then identify the file pairs and create a list of PrecitecData objects from them.
-
-        File pairs are identified by having the same base name, but with altitude or intensity suffixes. 
+        Then identify the altitude/intensity file pairs and create a list of (altitude_path, intensity_path) tuples from them.
+        
+        File pairs are identified by having the same base name when ignoring the altitude or intensity suffixes.
         For example:
-         - "measurement1_altitude.csv" and "measurement1_intensity.csv".
-         - "measurement2_100khz_altitude.bcrf" and "measurement2_intensity_100khz.bcrf".
+            - "measurement1_altitude.csv" and "measurement1_intensity.csv".
+            - "measurement2_100khz_altitude.bcrf" and "measurement2_intensity_100khz.bcrf".
         
-        filename suffixes are case-insensitive.
+        altitude or intensity suffixes are case-insensitive.
         Raises:
-          - finds any altitude file without a corresponding intensity file, or vice versa.
-          - finds a file named with altitude or intensity but the metadata indicates the opposite signal type.
+            - finds any altitude file without a corresponding intensity file, or vice versa.
+            - finds a file named with altitude or intensity but the metadata indicates the opposite signal type.
         """
-        altitude_files = {}
-        intensity_files = {}
+        altitude_files, intensity_files = {},{}
         
-        # Filter files by extension
         files = [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() == f".{filetype}"]
-        
         for file in files:
             # Extract base name by removing altitude/intensity suffix (case-insensitive)
             stem = file.stem
@@ -164,8 +162,16 @@ class PrecitecData:
             raise ValueError(f"Missing intensity files for: {', '.join(sorted(missing_intensity))}.")
         if missing_altitude:
             raise ValueError(f"Missing altitude files for: {', '.join(sorted(missing_altitude))}.")
-        
-        return [cls(altitude_files[key], intensity_files[key]) for key in sorted(altitude_keys)]
+        return [(altitude_files[key], intensity_files[key]) for key in sorted(altitude_keys)]
+
+    @classmethod
+    def from_folder(cls, folder: Path, filetype: Literal["csv", "bcrf"]) -> list[PrecitecData]:
+        """
+        Given a folder, identify the file pairs of the given filetype in it.
+        Then create a list of PrecitecData objects from them.
+        """
+        file_pairs= cls.find_file_pairs(folder, filetype)
+        return [cls(altitude, intensity) for altitude, intensity in file_pairs]
 
     def __repr__(self) -> str:
         return (

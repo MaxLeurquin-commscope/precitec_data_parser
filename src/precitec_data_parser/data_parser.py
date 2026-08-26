@@ -40,12 +40,21 @@ class PrecitecData:
     exports are both supported.
     """
 
-    def __init__(self, altitude_path: str | Path, intensity_path: str | Path):
-        self.altitude_path = Path(altitude_path)
-        self.intensity_path = Path(intensity_path)
+    def __init__(self, altitude_path: Path, intensity_path: Path | None):
+        #sometimes we do not care about the intensity signal, so we allow it to be None.
+        # In that case, we will only parse the altitude signal.
+        self.altitude_path = altitude_path
+        self.intensity_path = intensity_path if intensity_path is not None else None
 
         self.metadata_altitude, self.altitude, xstep, ystep = self._parse(self.altitude_path)
-        self.metadata_intensity, self.intensity, i_xstep, i_ystep = self._parse(self.intensity_path)
+
+        if self.intensity_path is not None:
+            self.metadata_intensity, self.intensity, i_xstep, i_ystep = self._parse(self.intensity_path)
+        else:
+            self.metadata_intensity = None
+            self.intensity = np.zeros_like(self.altitude)
+            i_xstep, i_ystep = xstep, ystep
+
 
         if self.altitude.shape != self.intensity.shape:
             raise ValueError(
@@ -83,7 +92,7 @@ class PrecitecData:
             return None
         
     @classmethod
-    def _parse(cls, path: Path) -> tuple[dict[str, Any], np.ndarray, float, float]:
+    def _parse(cls, path: Path) -> tuple[dict[str, Any] | None, np.ndarray, float, float]:
         """Parse a single export into (metadata, z, xstep, ystep)."""
         suffix = path.suffix.lower()
         match suffix:
@@ -91,13 +100,16 @@ class PrecitecData:
                 metadata, z, xstep, ystep = cls._parse_csv(path)
             case ".bcrf":
                 metadata, z, xstep, ystep = cls._parse_bcrf(path)
+            case ".txt":
+                metadata, z, xstep, ystep = cls._parse_txt(path)
             case _:
                 raise NotImplementedError(
-                    f"Only .csv and .bcrf exports are supported, got '{path.suffix}'. "
+                    f"Only .csv, .bcrf, and .txt exports are supported, got '{path.suffix}'. "
                     "The MountainsMap .mnt format stores its surface data in an "
                     "undocumented, proprietary binary blob."
                 )
-        metadata["Signal"] = cls._decode_signal(metadata)
+        if metadata is not None:
+            metadata["Signal"] = cls._decode_signal(metadata)
         return metadata, z, xstep, ystep
 
 
@@ -139,12 +151,13 @@ class PrecitecData:
             
             # Verify metadata matches filename
             metadata, _, _, _ = cls._parse(file)
-            actual_signal = metadata.get("Signal")
-            if actual_signal != signal_type:
-                raise ValueError(
-                    f"File '{file.name}': filename indicates {signal_type} "
-                    f"but metadata indicates {actual_signal}."
-                )
+            if metadata is not None: #metadata can be None for .txt files
+                actual_signal = metadata.get("Signal")
+                if actual_signal != signal_type:
+                    raise ValueError(
+                        f"File '{file.name}': filename indicates {signal_type} "
+                        f"but metadata indicates {actual_signal}."
+                    )
             
             # Store in appropriate dict
             target_dict = altitude_files if signal_type == "altitude" else intensity_files
@@ -230,6 +243,58 @@ class PrecitecData:
 
         return metadata, df.to_numpy().T, float(metadata["XStep"]), float(metadata["YStep"])
 
+
+    @staticmethod
+    def _parse_txt(path: Path) -> tuple[None, np.ndarray, float, float]:
+        """Parse a tab-separated Precitec text export.
+
+        The first three columns are X, Y and Z. Any columns after Z are ignored.
+        txt exports do not contain any interesting metadata, so this returns None for the metadata dict.
+        """
+        with open(path, encoding="utf-8", errors="replace") as file:
+            try:
+                header_index = next(i for i, line in enumerate(file) if line.strip() == "TH")
+            except StopIteration as exc:
+                raise ValueError(f"Text export '{path}' is missing the 'TH' header.") from exc
+
+        data = pd.read_csv(
+            path,
+            sep="\t",
+            skiprows=header_index,
+            usecols=[0, 1, 2],
+            decimal=",",
+        )
+        if [column.strip().upper() for column in data.columns] != ["X", "Y", "Z"]:
+            raise ValueError(f"Text export '{path}' must have X, Y and Z columns.")
+        data = data.astype(float)
+        if data.empty:
+            raise ValueError(f"Text export '{path}' contains no XYZ data points.")
+
+        x_values = np.sort(data["X"].unique())
+        y_values = np.sort(data["Y"].unique())
+        if len(x_values) < 2 or len(y_values) < 2:
+            raise ValueError("Text export must contain at least two X and Y coordinates.")
+
+        x_differences = np.diff(x_values)
+        y_differences = np.diff(y_values)
+        xstep = float(x_differences[0])
+        ystep = float(y_differences[0])
+        if not np.allclose(x_differences, xstep) or not np.allclose(y_differences, ystep):
+            raise ValueError("Text export coordinates do not form a regular grid.")
+
+        try:
+            z = data.pivot(index="Y", columns="X", values="Z").reindex(
+                index=y_values, columns=x_values
+            ).to_numpy()
+        except ValueError as exc:
+            raise ValueError(f"Text export '{path}' contains duplicate XY points.") from exc
+        if np.isnan(z).any():
+            raise ValueError("Text export does not contain a complete rectangular grid.")
+
+        return None, z, xstep, ystep
+
+                                        
+                
     @staticmethod
     def _stitch_lines(df: pd.DataFrame, metadata: dict[str, Any]) -> pd.DataFrame:
         """Join separately-scanned channel tiles into one full-width surface."""

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "precitec-data-parser"
-version = "0.3.6"
+version = "0.3.7"
 description = "Parse and analyze height-map exports from Precitec CLS2 sensors (.csv and .bcrf formats)"
 readme = "README.md"
 license = {text = "MIT"}

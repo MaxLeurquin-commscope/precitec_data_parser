@@ -13,6 +13,7 @@ from scipy import ndimage
 from types import SimpleNamespace
 from surfalize import Profile, Surface
 from pathlib import Path
+import plotly.graph_objects as go
 from .data_parser import PrecitecData
 
 
@@ -266,14 +267,15 @@ class PrecitecSurfaceAnalyzer:
         """ISO 25178 areal height parameters (Sa, Sq, Sz, Sv, Sp, Ssk, Sku)."""
         return self.analysis_surface.height_parameters()
 
-    def plot_3d(self, savepath: str | Path | None = None, **kwargs):
-        """Render the surface as a 3D shaded plot, optionally saving it.
-
-        Delegates to `surfalize.Surface.plot_3d`, which renders via pyvista
-        and returns a static `PIL.Image` (no `ax` support - it isn't a
-        matplotlib figure).
+    def plot_3d(self, savepath: str | Path, **kwargs):
+        """Save a 3D surface plot of the signal, optionally saving it to a file.
         """
-        return self.surface.plot_3d(save_to=savepath, **kwargs)
+        height_data = self.data.signals[self.signal]
+        fig = go.Figure(data=[go.Surface(x=self.data.x, y=self.data.y, z=height_data)])
+        fig.update_layout(title=dict(text='Height data'))
+        fig.write_html(savepath)
+        #self.surface.plot_3d(save_to=savepath, **kwargs)
+        return 
 
     def plot_2d(
         self,

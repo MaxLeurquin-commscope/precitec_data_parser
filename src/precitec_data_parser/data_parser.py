@@ -102,7 +102,7 @@ class PrecitecData:
 
 
     @classmethod
-    def find_file_pairs(cls,filepaths:list[str]) -> list[tuple[Path, Path]]:
+    def find_file_pairs(cls,filepaths:list[Path]) -> list[tuple[Path, Path]]:
         """
         Given a list of filepaths identify the altitude/intensity file pairs and 
         create a list of (altitude_path, intensity_path) tuples from them.
@@ -170,7 +170,7 @@ class PrecitecData:
 
 
     @classmethod
-    def from_file_pairs(cls, file_pairs: list[tuple[str | Path, str | Path]]) -> list[PrecitecData]:
+    def from_file_pairs(cls, file_pairs: list[tuple[Path,Path]]) -> list[PrecitecData]:
         """
         Given a list of (altitude_path, intensity_path) tuples, create a list of PrecitecData objects from them.
         """

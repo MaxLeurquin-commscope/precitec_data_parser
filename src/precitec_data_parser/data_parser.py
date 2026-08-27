@@ -251,35 +251,45 @@ class PrecitecData:
         The first three columns are X, Y and Z. Any columns after Z are ignored.
         txt exports do not contain any interesting metadata, so this returns None for the metadata dict.
         """
-        with open(path, encoding="utf-8", errors="replace") as file:
-            try:
-                header_index = next(i for i, line in enumerate(file) if line.strip() == "TH")
-            except StopIteration as exc:
-                raise ValueError(f"Text export '{path}' is missing the 'TH' header.") from exc
 
         data = pd.read_csv(
             path,
             sep="\t",
-            skiprows=header_index,
+            skiprows=1,
             usecols=[0, 1, 2],
             decimal=",",
+            encoding="utf-16"
         )
         if [column.strip().upper() for column in data.columns] != ["X", "Y", "Z"]:
             raise ValueError(f"Text export '{path}' must have X, Y and Z columns.")
         data = data.astype(float)
         if data.empty:
             raise ValueError(f"Text export '{path}' contains no XYZ data points.")
+        #convert data to µm (from mm)
+        data["X"] *= 1000
+        data["Y"] *= 1000
+        data["Z"] *= 1000
+        x_values = np.array(sorted(set(data["X"].values)))
+        y_values = np.array(sorted(set(data["Y"].values)))
 
-        x_values = np.sort(data["X"].unique())
-        y_values = np.sort(data["Y"].unique())
         if len(x_values) < 2 or len(y_values) < 2:
             raise ValueError("Text export must contain at least two X and Y coordinates.")
 
         x_differences = np.diff(x_values)
         y_differences = np.diff(y_values)
-        xstep = float(x_differences[0])
-        ystep = float(y_differences[0])
-        if not np.allclose(x_differences, xstep) or not np.allclose(y_differences, ystep):
+
+        # Use the median as the representative step — robust to a few noisy outliers
+        xstep = float(np.median(x_differences))
+        ystep = float(np.median(y_differences))
+
+        #TODO: not the best way to check for a regular grid, but it works for now
+        # Explicit, sane tolerances instead of relying on set()-based "equality"
+        atol = 1
+        rtol = 0
+
+        if not np.allclose(x_differences, xstep, rtol=rtol, atol=atol) or \
+        not np.allclose(y_differences, ystep, rtol=rtol, atol=atol):
+            print(f"{x_differences=}, {y_differences=}")
             raise ValueError("Text export coordinates do not form a regular grid.")
 
         try:

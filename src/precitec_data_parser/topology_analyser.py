@@ -6,14 +6,12 @@ Description: 3D surface and profile analysis for parsed `PrecitecData`, backed b
 
 from typing import Any, cast
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from scipy import ndimage
 from types import SimpleNamespace
 from surfalize import Profile, Surface
 from pathlib import Path
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from .data_parser import PrecitecData
 
 
@@ -267,44 +265,52 @@ class PrecitecSurfaceAnalyzer:
         """ISO 25178 areal height parameters (Sa, Sq, Sz, Sv, Sp, Ssk, Sku)."""
         return self.analysis_surface.height_parameters()
 
-    def plot_3d(self, savepath: str | Path, **kwargs):
-        """Save a 3D surface plot of the signal, optionally saving it to a file.
-        """
+    def plot_3d(self, savepath: str | Path | None = None, show: bool = False, **kwargs) -> go.Figure:
+        """Build an interactive 3D surface plot of the signal, optionally saving it to an HTML file."""
         height_data = self.data.signals[self.signal]
         fig = go.Figure(data=[go.Surface(x=self.data.x, y=self.data.y, z=height_data)])
         fig.update_layout(title=dict(text='Height data'))
-        fig.write_html(savepath)
-        #self.surface.plot_3d(save_to=savepath, **kwargs)
-        return 
+        if savepath is not None:
+            fig.write_html(savepath)
+        if show:
+            fig.show()
+        return fig
 
-    def plot_2d(
-        self,
-        ax: Axes | None = None,
-        savepath: str | Path | None = None,
-        show: bool = True,
-        **kwargs,
-    ):
-        """Render the surface as a top-down color-mapped plot, optionally saving it."""
-        created_fig = ax is None
-        fig, ax = self.surface.plot_2d(ax=ax, save_to=savepath, **kwargs)
-        if show and created_fig:
-            plt.show()
-        elif created_fig and not show:
-            plt.close(fig)
-        return fig, ax
+    def _heatmap_trace(self, **kwargs) -> go.Heatmap:
+        """Build the top-down color-mapped `go.Heatmap` trace for `self.surface`.
+
+        Row 0 of `surface.data` is the top of the measurement (y = height_um),
+        matching the orientation used by `oblique_profile`/`horizontal_profile`/
+        `vertical_profile` and surfalize's own `imshow`-based `plot_2d`.
+        """
+        ny, nx = self.surface.data.shape
+        x = np.arange(nx) * self.surface.step_x
+        y = (ny - 1 - np.arange(ny)) * self.surface.step_y
+        kwargs.setdefault("colorscale", "Jet")
+        kwargs.setdefault("colorbar", dict(title=self.signal))
+        return go.Heatmap(z=self.surface.data, x=x, y=y, hovertemplate="x: %{x:.2f} µm<br>y: %{y:.2f} µm<br>z: %{z:.3f}<extra></extra>", **kwargs)
+
+    def plot_2d(self, savepath: str | Path | None = None, show: bool = False, **kwargs) -> go.Figure:
+        """Render the surface as an interactive top-down color-mapped plot, optionally saving it to an HTML file."""
+        fig = go.Figure(data=[self._heatmap_trace(**kwargs)])
+        fig.update_layout(title=dict(text=f"{self.signal.capitalize()} (top-down)"), xaxis_title="X (µm)", yaxis_title="Y (µm)")
+        fig.update_yaxes(scaleanchor="x", scaleratio=1)
+        if savepath is not None:
+            fig.write_html(savepath)
+        if show:
+            fig.show()
+        return fig
 
     def plot_profile(
         self,
         profile: Profile,
         filtered: Profile | None = None,
-        ax_profile: Axes | None = None,
-        ax_2d: Axes | None = None,
         show_2d: bool = True,
         savepath: str | Path | None = None,
-        show: bool = True,
+        show: bool = False,
         **plot_2d_kwargs,
-    ):
-        """Plot a `Profile` (e.g. from `horizontal_profile`).
+    ) -> go.Figure:
+        """Plot a `Profile` (e.g. from `horizontal_profile`) as an interactive figure.
 
         By default this also plots the top-down 2D surface map alongside it,
         with a line marking where the profile was extracted from - taken
@@ -317,46 +323,48 @@ class PrecitecSurfaceAnalyzer:
         filtered : Profile, default None
             A filtered version of `profile` (e.g. from `filter_profile`) to
             draw on top of the raw signal, for comparison.
-        ax_profile, ax_2d : matplotlib axes, default None
-            If both are given, draw into them instead of creating a new
-            figure - use this to embed the plot into a larger, custom figure
-            layout. If `show_2d` is False, only `ax_profile` is needed.
         """
-        created_fig = ax_profile is None and ax_2d is None
+        x_profile = np.linspace(0, profile.length_um, profile.data.size)
 
         if show_2d:
-            if created_fig:
-                fig, (ax_2d, ax_profile) = plt.subplots(1, 2, figsize=(14, 6))
-            elif ax_profile is None or ax_2d is None:
-                raise ValueError("show_2d=True requires both ax_profile and ax_2d if either is given.")
-            else:
-                fig = cast(Figure, ax_profile.figure)
-
-            self.plot_2d(ax=ax_2d, show=False, **plot_2d_kwargs)
+            fig = make_subplots(rows=1, cols=2, subplot_titles=(f"{self.signal.capitalize()} (top-down)", "Profile"))
+            fig.add_trace(self._heatmap_trace(**plot_2d_kwargs), row=1, col=1)
             location = getattr(profile, "location", None)
             if location is not None:
-                assert ax_2d is not None
-                ax_2d.plot([location.x0, location.x1], [location.y0, location.y1], color="red", lw=2)
+                fig.add_trace(
+                    go.Scatter(
+                        x=[location.x0, location.x1], y=[location.y0, location.y1],
+                        mode="lines", line=dict(color="red", width=2), showlegend=False,
+                    ),
+                    row=1, col=1,
+                )
+            fig.update_xaxes(title_text="X (µm)", row=1, col=1)
+            fig.update_yaxes(title_text="Y (µm)", scaleanchor="x", scaleratio=1, row=1, col=1)
+            fig.update_xaxes(title_text="Distance (µm)", row=1, col=2)
+            fig.update_yaxes(title_text=self.signal, row=1, col=2)
         else:
-            if ax_profile is None:
-                fig, ax_profile = plt.subplots(figsize=(10, 4))
-            else:
-                fig = cast(Figure, ax_profile.figure)
+            fig = go.Figure()
 
-        assert ax_profile is not None
-        profile.plot_2d(ax=ax_profile)
+        raw_trace = go.Scatter(x=x_profile, y=profile.data, mode="lines", line=dict(color="black", width=1), name="raw")
+        if show_2d:
+            fig.add_trace(raw_trace, row=1, col=2)
+        else:
+            fig.add_trace(raw_trace)
         if filtered is not None:
-            ax_profile.plot(
-                np.linspace(0, filtered.length_um, filtered.data.size),
-                filtered.data, color="tab:orange", lw=1.5, label="filtered",
+            filtered_trace = go.Scatter(
+                x=np.linspace(0, filtered.length_um, filtered.data.size), y=filtered.data,
+                mode="lines", line=dict(color="orange", width=1.5), name="filtered",
             )
-            ax_profile.legend()
-        ax_profile.grid(True)
+            if show_2d:
+                fig.add_trace(filtered_trace, row=1, col=2)
+            else:
+                fig.add_trace(filtered_trace)
+
+        if not show_2d:
+            fig.update_layout(xaxis_title="Distance (µm)", yaxis_title=self.signal)
 
         if savepath is not None:
-            fig.savefig(savepath, dpi=200, bbox_inches="tight")
-        if show and created_fig:
-            plt.show()
-        elif created_fig and not show:
-            plt.close(fig)
-        return fig, ax_profile, ax_2d
+            fig.write_html(savepath)
+        if show:
+            fig.show()
+        return fig

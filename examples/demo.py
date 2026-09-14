@@ -36,8 +36,8 @@ if __name__ == "__main__":
     analyzer.plot_2d(show=True)
 
     print("=== Plotting 3D surface ===")
-    analyzer.plot_3d(savepath="grooves_3d.png")
-    print("Saved 3D plot to grooves_3d.png")
+    analyzer.plot_3d(savepath="grooves_3d.html")
+    print("Saved 3D plot to grooves_3d.html")
 
     # Extract profiles at different positions
     y_pos = data.y[len(data.y) // 2]

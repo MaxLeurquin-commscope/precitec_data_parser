@@ -18,7 +18,7 @@ Parse and analyze height-map exports from Precitec CLS2 sensors (`.csv` and `.bc
   - `roughness_parameters()` / `height_parameters()` - ISO 25178 areal parameters (Sa, Sq, Sz, Sdr, ...).
   - `horizontal_profile()` / `vertical_profile()` / `oblique_profile()` - extract 1D profile cuts (with a bug fix for oblique profiles on anisotropic pixel grids) and their ISO 4287 parameters (Ra, Rq, Rz, ...).
   - `filter_profile()` - Gaussian low/high/bandpass smoothing or Hampel outlier removal on a profile.
-  - `plot_3d()`, `plot_2d()`, `plot_profile()` - shaded 3D rendering, top-down 2D map, and profile plots (with the cut line overlaid on the 2D map).
+  - `plot_3d()`, `plot_2d()`, `plot_profile()` - interactive (zoom/pan/hover) Plotly figures: shaded 3D rendering, top-down 2D map, and profile plots (with the cut line overlaid on the 2D map).
 
 ## Installation
 

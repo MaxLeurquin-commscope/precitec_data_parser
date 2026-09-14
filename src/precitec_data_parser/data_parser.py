@@ -79,6 +79,19 @@ class PrecitecData:
         self.x = np.arange(n_samples) * xstep
         self.y = np.arange(n_channels) * ystep
 
+
+    def threshold_data(self, thresh: float) -> None:
+        """Mask points whose intensity is below ``thresh``.
+
+        Thresholded points are set to ``NaN`` in both signals and added to the
+        shared non-measured mask. Existing non-measured points remain masked.
+        """
+        threshold_mask = self.intensity < thresh
+        self.altitude[threshold_mask] = np.nan
+        self.intensity[threshold_mask] = np.nan
+        self.nonmeasured[threshold_mask] = True
+        return
+
     @staticmethod
     def _decode_signal(metadata: dict[str, Any]) -> Literal["altitude", "intensity"] | None:
         """Return 'altitude'/'intensity' from the metadata's signal id, else None."""

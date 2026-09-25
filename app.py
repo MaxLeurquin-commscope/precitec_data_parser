@@ -112,6 +112,10 @@ def main():
                 profile = analyzer_alt.vertical_profile(x=position)
 
         with st.sidebar:
+            st.header("Display")
+            intensity_grayscale = st.checkbox("Display intensity in grayscale")
+
+        with st.sidebar:
             st.header("Filter")
             method = st.selectbox("Method", ["None", "gaussian", "hampel"])
             filter_args: dict = {}
@@ -128,7 +132,8 @@ def main():
 
         col_alt, col_int = st.columns(2)
         for col, analyzer, title in ((col_alt, analyzer_alt, "Altitude"), (col_int, analyzer_int, "Intensity")):
-            fig = analyzer.plot_2d()
+            plot_kwargs = {"colorscale": "Greys_r"} if title == "Intensity" and intensity_grayscale else {}
+            fig = analyzer.plot_2d(**plot_kwargs)
             fig.add_scatter(
                 x=[profile.location.x0, profile.location.x1],
                 y=[profile.location.y0, profile.location.y1],

@@ -5,12 +5,15 @@ Description: parse Precitec CLS2 exports (.csv or .bcrf) into altitude/intensity
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
 from surfalize import Surface
+
+logger = logging.getLogger(__name__)
 
 # BCRF physical lengths are in mm regardless of the reported unit.
 _UM_PER_MM = 1000.0
@@ -67,7 +70,6 @@ class PrecitecData:
 
         self.xstep = xstep
         self.ystep = ystep
-        self.signals = {"altitude": self.altitude, "intensity": self.intensity}
 
         # Non-measured points are where the sensor found no surface (altitude == 0);
         # this shared mask must drive both signals - intensity can legitimately read
@@ -86,11 +88,54 @@ class PrecitecData:
         Thresholded points are set to ``NaN`` in both signals and added to the
         shared non-measured mask. Existing non-measured points remain masked.
         """
+        pixels_before = (~self.nonmeasured).sum()
         threshold_mask = self.intensity < thresh
         self.altitude[threshold_mask] = np.nan
         self.intensity[threshold_mask] = np.nan
         self.nonmeasured[threshold_mask] = True
+        pixels_after = (~self.nonmeasured).sum()
+        pixels_removed = pixels_before - pixels_after
+        logger.debug(
+            f"Thresholding at {thresh}: removed {pixels_removed} pixels "
+            f"({100*pixels_removed/pixels_before:.1f}%)"
+        )
         return
+
+    def transpose(self) -> None:
+        """Swap x/y axes
+
+        This modifies the object in-place: altitude, intensity, x, y, xstep, and ystep are transposed.
+        The nonmeasured mask is also transposed.
+        """
+        self.altitude = self.altitude.T
+        self.intensity = self.intensity.T
+        self.nonmeasured = self.nonmeasured.T
+        self.x, self.y = self.y, self.x
+        self.xstep, self.ystep = self.ystep, self.xstep
+        logger.debug("Data transposed: x/y axes swapped")
+
+    def copy(self) -> "PrecitecData":
+        """Create an independent copy of this PrecitecData object.
+        
+        The copy has independent arrays (altitude, intensity, nonmeasured, x, y)
+        so modifications to the copy do not affect the original.
+        
+        Returns:
+            A new PrecitecData object with copied arrays.
+        """
+        new_obj = object.__new__(PrecitecData)
+        new_obj.altitude_path = self.altitude_path
+        new_obj.intensity_path = self.intensity_path
+        new_obj.metadata_altitude = self.metadata_altitude.copy() if self.metadata_altitude else None
+        new_obj.metadata_intensity = self.metadata_intensity.copy() if self.metadata_intensity else None
+        new_obj.altitude = self.altitude.copy()
+        new_obj.intensity = self.intensity.copy()
+        new_obj.nonmeasured = self.nonmeasured.copy()
+        new_obj.xstep = self.xstep
+        new_obj.ystep = self.ystep
+        new_obj.x = self.x.copy()
+        new_obj.y = self.y.copy()
+        return new_obj
 
     @staticmethod
     def _decode_signal(metadata: dict[str, Any]) -> Literal["altitude", "intensity"] | None:
@@ -354,7 +399,7 @@ class PrecitecData:
         ypixels = int(fields["ypixels"])
         dtype = "<f4" if fields.get("intelmode", 1) else ">f4"
 
-        z = np.frombuffer(path.read_bytes()[header_bytes:], dtype=dtype).reshape(ypixels, xpixels)
+        z = np.frombuffer(path.read_bytes()[header_bytes:], dtype=dtype).reshape(ypixels, xpixels).copy()
 
         um_per_unit = {"mm": _UM_PER_MM, "um": 1.0, "nm": 1e-3}
         xstep = float(fields["xlength"]) * um_per_unit[fields["xunit"]] / xpixels
@@ -363,10 +408,13 @@ class PrecitecData:
 
     def signal_data(self, signal: Literal["altitude", "intensity"]) -> np.ndarray:
         """Return the altitude or intensity matrix."""
-        try:
-            return self.signals[signal.strip().lower()]
-        except KeyError:
-            raise KeyError("Signal must be 'altitude' or 'intensity'.") from None
+        signal_lower = signal.strip().lower()
+        if signal_lower == "altitude":
+            return self.altitude
+        elif signal_lower == "intensity":
+            return self.intensity
+        else:
+            raise KeyError("Signal must be 'altitude' or 'intensity'.")
 
     def to_surface(self, signal:Literal["altitude", "intensity"],fill_nonmeasured: bool = True, ) -> Surface:
         """Convert the altitude or intensity data to a surfalize Surface.

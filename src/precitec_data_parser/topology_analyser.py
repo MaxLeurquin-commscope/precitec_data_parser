@@ -87,7 +87,8 @@ class PrecitecSurfaceAnalyzer:
         if self._filled_surface is None:
             self._filled_surface = (
                 self.surface.fill_nonmeasured()
-                if self.surface.has_missing_points else self.surface
+                if self.surface.has_missing_points
+                else self.surface
             )
         return self._filled_surface
 
@@ -106,7 +107,11 @@ class PrecitecSurfaceAnalyzer:
         profile = self.surface.get_horizontal_profile(y, **kwargs)
         x0 = kwargs.get("start") or 0.0
         x1 = kwargs.get("end") or self.surface.width_um
-        setattr(profile, "location", SimpleNamespace(kind="horizontal", x0=x0, y0=y, x1=x1, y1=y))
+        setattr(
+            profile,
+            "location",
+            SimpleNamespace(kind="horizontal", x0=x0, y0=y, x1=x1, y1=y),
+        )
         return profile
 
     def vertical_profile(self, x: float, **kwargs) -> Profile:
@@ -118,7 +123,11 @@ class PrecitecSurfaceAnalyzer:
         profile = self.surface.get_vertical_profile(x, **kwargs)
         y0 = kwargs.get("start") or 0.0
         y1 = kwargs.get("end") or self.surface.height_um
-        setattr(profile, "location", SimpleNamespace(kind="vertical", x0=x, y0=y0, x1=x, y1=y1))
+        setattr(
+            profile,
+            "location",
+            SimpleNamespace(kind="vertical", x0=x, y0=y0, x1=x, y1=y1),
+        )
         return profile
 
     def oblique_profile(self, x0: float, y0: float, x1: float, y1: float) -> Profile:
@@ -177,13 +186,17 @@ class PrecitecSurfaceAnalyzer:
         data = ndimage.map_coordinates(self._filled.data, [yp, xp])
         # Blank samples touching non-measured data (order=1 flags any contribution).
         touched_nonmeasured = ndimage.map_coordinates(
-            self.data.nonmeasured.astype(float), [yp, xp], order=1
+            self.data.nonmeasured, [yp, xp], output=np.float64, order=1
         )
         data[touched_nonmeasured > 0] = np.nan
 
         step = length_um / (n_samples - 1)
         profile = Profile(data, step, length_um)
-        setattr(profile, "location", SimpleNamespace(kind="oblique", x0=x0, y0=y0, x1=x1, y1=y1))
+        setattr(
+            profile,
+            "location",
+            SimpleNamespace(kind="oblique", x0=x0, y0=y0, x1=x1, y1=y1),
+        )
         return profile
 
     # Maps a `method` name to the `_<name>_filter` static method that implements
@@ -216,7 +229,9 @@ class PrecitecSurfaceAnalyzer:
         """
         attr_name = self._FILTERS.get(method)
         if attr_name is None:
-            raise ValueError(f'Unknown filter method "{method}", expected one of {sorted(self._FILTERS)}.')
+            raise ValueError(
+                f'Unknown filter method "{method}", expected one of {sorted(self._FILTERS)}.'
+            )
         filter_func = getattr(self, attr_name)
         filtered = filter_func(profile, **(filter_args or {}))
 
@@ -226,7 +241,9 @@ class PrecitecSurfaceAnalyzer:
         return filtered
 
     @staticmethod
-    def _gaussian_filter(profile: Profile, cutoff: float, filter_type: str = "lowpass", **kwargs) -> Profile:
+    def _gaussian_filter(
+        profile: Profile, cutoff: float, filter_type: str = "lowpass", **kwargs
+    ) -> Profile:
         """Smooth the whole signal via `surfalize`'s Gaussian low/high/bandpass
         filter - every point is blended with its neighbors.
 
@@ -235,11 +252,15 @@ class PrecitecSurfaceAnalyzer:
         "highpass"). `filter_type` is one of "lowpass", "highpass", "bandpass".
         """
         if filter_type not in ("lowpass", "highpass", "bandpass"):
-            raise ValueError(f'Unknown filter_type "{filter_type}", expected "lowpass", "highpass" or "bandpass".')
+            raise ValueError(
+                f'Unknown filter_type "{filter_type}", expected "lowpass", "highpass" or "bandpass".'
+            )
         return cast(Profile, profile.filter(filter_type, cutoff, **kwargs))
 
     @staticmethod
-    def _hampel_filter(profile: Profile, window_size: int = 5, n_sigmas: float = 3.0) -> Profile:
+    def _hampel_filter(
+        profile: Profile, window_size: int = 5, n_sigmas: float = 3.0
+    ) -> Profile:
         """Replace outlier points with the local median (Hampel identifier),
         leaving everything else untouched - unlike `_gaussian_filter`, which
         blends every point with its neighbors.
@@ -257,7 +278,9 @@ class PrecitecSurfaceAnalyzer:
         cleaned = np.where(deviation > threshold, local_median, data)
         return Profile(cleaned, profile.step, profile.length_um)
 
-    def roughness_parameters(self, parameters: list[str] | None = None) -> dict[str, float]:
+    def roughness_parameters(
+        self, parameters: list[str] | None = None
+    ) -> dict[str, float]:
         """ISO 25178 areal roughness parameters (Sa, Sq, Sz, Sdr, ... by default all)."""
         return self.analysis_surface.roughness_parameters(parameters)
 
@@ -265,11 +288,13 @@ class PrecitecSurfaceAnalyzer:
         """ISO 25178 areal height parameters (Sa, Sq, Sz, Sv, Sp, Ssk, Sku)."""
         return self.analysis_surface.height_parameters()
 
-    def plot_3d(self, savepath: str | Path | None = None, show: bool = False, **kwargs) -> go.Figure:
+    def plot_3d(
+        self, savepath: str | Path | None = None, show: bool = False, **kwargs
+    ) -> go.Figure:
         """Build an interactive 3D surface plot of the signal, optionally saving it to an HTML file."""
-        height_data = self.data.signals[self.signal]
+        height_data = self.data.signal_data(self.signal)
         fig = go.Figure(data=[go.Surface(x=self.data.x, y=self.data.y, z=height_data)])
-        fig.update_layout(title=dict(text='Height data'))
+        fig.update_layout(title=dict(text="Height data"))
         if savepath is not None:
             fig.write_html(savepath)
         if show:
@@ -288,12 +313,24 @@ class PrecitecSurfaceAnalyzer:
         y = (ny - 1 - np.arange(ny)) * self.surface.step_y
         kwargs.setdefault("colorscale", "Jet")
         kwargs.setdefault("colorbar", dict(title=self.signal))
-        return go.Heatmap(z=self.surface.data, x=x, y=y, hovertemplate="x: %{x:.2f} µm<br>y: %{y:.2f} µm<br>z: %{z:.3f}<extra></extra>", **kwargs)
+        return go.Heatmap(
+            z=self.surface.data,
+            x=x,
+            y=y,
+            hovertemplate="x: %{x:.2f} µm<br>y: %{y:.2f} µm<br>z: %{z:.3f}<extra></extra>",
+            **kwargs,
+        )
 
-    def plot_2d(self, savepath: str | Path | None = None, show: bool = False, **kwargs) -> go.Figure:
+    def plot_2d(
+        self, savepath: str | Path | None = None, show: bool = False, **kwargs
+    ) -> go.Figure:
         """Render the surface as an interactive top-down color-mapped plot, optionally saving it to an HTML file."""
         fig = go.Figure(data=[self._heatmap_trace(**kwargs)])
-        fig.update_layout(title=dict(text=f"{self.signal.capitalize()} (top-down)"), xaxis_title="X (µm)", yaxis_title="Y (µm)")
+        fig.update_layout(
+            title=dict(text=f"{self.signal.capitalize()} (top-down)"),
+            xaxis_title="X (µm)",
+            yaxis_title="Y (µm)",
+        )
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
         if savepath is not None:
             fig.write_html(savepath)
@@ -327,33 +364,52 @@ class PrecitecSurfaceAnalyzer:
         x_profile = np.linspace(0, profile.length_um, profile.data.size)
 
         if show_2d:
-            fig = make_subplots(rows=1, cols=2, subplot_titles=(f"{self.signal.capitalize()} (top-down)", "Profile"))
+            fig = make_subplots(
+                rows=1,
+                cols=2,
+                subplot_titles=(f"{self.signal.capitalize()} (top-down)", "Profile"),
+            )
             fig.add_trace(self._heatmap_trace(**plot_2d_kwargs), row=1, col=1)
             location = getattr(profile, "location", None)
             if location is not None:
                 fig.add_trace(
                     go.Scatter(
-                        x=[location.x0, location.x1], y=[location.y0, location.y1],
-                        mode="lines", line=dict(color="red", width=2), showlegend=False,
+                        x=[location.x0, location.x1],
+                        y=[location.y0, location.y1],
+                        mode="lines",
+                        line=dict(color="red", width=2),
+                        showlegend=False,
                     ),
-                    row=1, col=1,
+                    row=1,
+                    col=1,
                 )
             fig.update_xaxes(title_text="X (µm)", row=1, col=1)
-            fig.update_yaxes(title_text="Y (µm)", scaleanchor="x", scaleratio=1, row=1, col=1)
+            fig.update_yaxes(
+                title_text="Y (µm)", scaleanchor="x", scaleratio=1, row=1, col=1
+            )
             fig.update_xaxes(title_text="Distance (µm)", row=1, col=2)
             fig.update_yaxes(title_text=self.signal, row=1, col=2)
         else:
             fig = go.Figure()
 
-        raw_trace = go.Scatter(x=x_profile, y=profile.data, mode="lines", line=dict(color="black", width=1), name="raw")
+        raw_trace = go.Scatter(
+            x=x_profile,
+            y=profile.data,
+            mode="lines",
+            line=dict(color="black", width=1),
+            name="raw",
+        )
         if show_2d:
             fig.add_trace(raw_trace, row=1, col=2)
         else:
             fig.add_trace(raw_trace)
         if filtered is not None:
             filtered_trace = go.Scatter(
-                x=np.linspace(0, filtered.length_um, filtered.data.size), y=filtered.data,
-                mode="lines", line=dict(color="orange", width=1.5), name="filtered",
+                x=np.linspace(0, filtered.length_um, filtered.data.size),
+                y=filtered.data,
+                mode="lines",
+                line=dict(color="orange", width=1.5),
+                name="filtered",
             )
             if show_2d:
                 fig.add_trace(filtered_trace, row=1, col=2)

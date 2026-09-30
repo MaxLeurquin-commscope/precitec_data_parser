@@ -3,11 +3,12 @@ Author: Maxime Leurquin.
 Date: July 2026
 Description: parse Precitec CLS2 exports (.csv or .bcrf) into altitude/intensity arrays.
 """
+
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, overload
 
 import numpy as np
 import pandas as pd
@@ -34,6 +35,7 @@ def _convert_value(value: str) -> Any:
         pass
     return {"True": True, "False": False}.get(value, value)
 
+
 class PrecitecData:
     """Parse a Precitec measurement pair (altitude + intensity) into one object.
 
@@ -44,20 +46,27 @@ class PrecitecData:
     """
 
     def __init__(self, altitude_path: Path, intensity_path: Path | None):
-        #sometimes we do not care about the intensity signal, so we allow it to be None.
+        # sometimes we do not care about the intensity signal, so we allow it to be None.
         # In that case, we will only parse the altitude signal.
         self.altitude_path = altitude_path
         self.intensity_path = intensity_path if intensity_path is not None else None
 
-        self.metadata_altitude, self.altitude, xstep, ystep = self._parse(self.altitude_path)
+        self.metadata_altitude, self.altitude, xstep, ystep = self._parse(
+            self.altitude_path
+        )
+        if not self.altitude.flags.writeable:
+            self.altitude = self.altitude.copy()
 
         if self.intensity_path is not None:
-            self.metadata_intensity, self.intensity, i_xstep, i_ystep = self._parse(self.intensity_path)
+            self.metadata_intensity, self.intensity, i_xstep, i_ystep = self._parse(
+                self.intensity_path
+            )
+            if not self.intensity.flags.writeable:
+                self.intensity = self.intensity.copy()
         else:
             self.metadata_intensity = None
             self.intensity = np.zeros_like(self.altitude)
             i_xstep, i_ystep = xstep, ystep
-
 
         if self.altitude.shape != self.intensity.shape:
             raise ValueError(
@@ -75,19 +84,40 @@ class PrecitecData:
         # this shared mask must drive both signals - intensity can legitimately read
         # 0 at a measured point, so it cannot define "non-measured" on its own.
         self.nonmeasured = self.altitude == 0.0
+        self.altitude[self.nonmeasured] = np.nan  # set non measured points to NaN
+        self.intensity[self.nonmeasured] = np.nan
 
         # z[j, i] is the value at (x[i], y[j]); rows = channels, columns = samples.
         n_channels, n_samples = self.altitude.shape
         self.x = np.arange(n_samples) * xstep
         self.y = np.arange(n_channels) * ystep
 
+    @overload
+    def threshold_data(
+        self, thresh: float, *, inplace: Literal[True] = True
+    ) -> None: ...
 
-    def threshold_data(self, thresh: float) -> None:
+    @overload
+    def threshold_data(
+        self, thresh: float, *, inplace: Literal[False]
+    ) -> PrecitecData: ...
+
+    def threshold_data(
+        self, thresh: float, *, inplace: bool = True
+    ) -> PrecitecData | None:
         """Mask points whose intensity is below ``thresh``.
 
         Thresholded points are set to ``NaN`` in both signals and added to the
         shared non-measured mask. Existing non-measured points remain masked.
+
+        By default this modifies the current object and returns ``None``. Set
+        ``inplace=False`` to return an independently modified copy.
         """
+        if not inplace:
+            thresholded = self.copy()
+            thresholded.threshold_data(thresh)
+            return thresholded
+
         pixels_before = (~self.nonmeasured).sum()
         threshold_mask = self.intensity < thresh
         self.altitude[threshold_mask] = np.nan
@@ -97,16 +127,27 @@ class PrecitecData:
         pixels_removed = pixels_before - pixels_after
         logger.debug(
             f"Thresholding at {thresh}: removed {pixels_removed} pixels "
-            f"({100*pixels_removed/pixels_before:.1f}%)"
+            f"({100 * pixels_removed / pixels_before:.1f}%)"
         )
         return
 
-    def transpose(self) -> None:
+    @overload
+    def transpose(self, *, inplace: Literal[True] = True) -> None: ...
+
+    @overload
+    def transpose(self, *, inplace: Literal[False]) -> PrecitecData: ...
+
+    def transpose(self, *, inplace: bool = True) -> PrecitecData | None:
         """Swap x/y axes
 
-        This modifies the object in-place: altitude, intensity, x, y, xstep, and ystep are transposed.
-        The nonmeasured mask is also transposed.
+        By default this modifies the current object and returns ``None``. Set
+        ``inplace=False`` to return an independently transposed copy.
         """
+        if not inplace:
+            transposed = self.copy()
+            transposed.transpose()
+            return transposed
+
         self.altitude = self.altitude.T
         self.intensity = self.intensity.T
         self.nonmeasured = self.nonmeasured.T
@@ -114,20 +155,46 @@ class PrecitecData:
         self.xstep, self.ystep = self.ystep, self.xstep
         logger.debug("Data transposed: x/y axes swapped")
 
+    @overload
+    def flip_x(self, *, inplace: Literal[True] = True) -> None: ...
+
+    @overload
+    def flip_x(self, *, inplace: Literal[False]) -> PrecitecData: ...
+
+    def flip_x(self, *, inplace: bool = True) -> PrecitecData | None:
+        """Mirror data across x while keeping coordinates ascending.
+
+        By default this modifies the current object and returns ``None``. Set
+        ``inplace=False`` to return an independently flipped copy.
+        """
+        if not inplace:
+            flipped = self.copy()
+            flipped.flip_x()
+            return flipped
+
+        self.altitude = self.altitude[:, ::-1].copy()
+        self.intensity = self.intensity[:, ::-1].copy()
+        self.nonmeasured = self.nonmeasured[:, ::-1].copy()
+        logger.debug("Measurement data flipped along x; coordinates remain ascending")
+
     def copy(self) -> "PrecitecData":
         """Create an independent copy of this PrecitecData object.
-        
+
         The copy has independent arrays (altitude, intensity, nonmeasured, x, y)
         so modifications to the copy do not affect the original.
-        
+
         Returns:
             A new PrecitecData object with copied arrays.
         """
         new_obj = object.__new__(PrecitecData)
         new_obj.altitude_path = self.altitude_path
         new_obj.intensity_path = self.intensity_path
-        new_obj.metadata_altitude = self.metadata_altitude.copy() if self.metadata_altitude else None
-        new_obj.metadata_intensity = self.metadata_intensity.copy() if self.metadata_intensity else None
+        new_obj.metadata_altitude = (
+            self.metadata_altitude.copy() if self.metadata_altitude else None
+        )
+        new_obj.metadata_intensity = (
+            self.metadata_intensity.copy() if self.metadata_intensity else None
+        )
         new_obj.altitude = self.altitude.copy()
         new_obj.intensity = self.intensity.copy()
         new_obj.nonmeasured = self.nonmeasured.copy()
@@ -138,7 +205,9 @@ class PrecitecData:
         return new_obj
 
     @staticmethod
-    def _decode_signal(metadata: dict[str, Any]) -> Literal["altitude", "intensity"] | None:
+    def _decode_signal(
+        metadata: dict[str, Any],
+    ) -> Literal["altitude", "intensity"] | None:
         """Return 'altitude'/'intensity' from the metadata's signal id, else None."""
         signal_id = metadata.get("IdSignal") or metadata.get("signal_id")
         if signal_id is None:
@@ -148,9 +217,11 @@ class PrecitecData:
             return cast(Literal["altitude", "intensity"] | None, result)
         except (TypeError, ValueError):
             return None
-        
+
     @classmethod
-    def _parse(cls, path: Path) -> tuple[dict[str, Any] | None, np.ndarray, float, float]:
+    def _parse(
+        cls, path: Path
+    ) -> tuple[dict[str, Any] | None, np.ndarray, float, float]:
         """Parse a single export into (metadata, z, xstep, ystep)."""
         suffix = path.suffix.lower()
         match suffix:
@@ -170,91 +241,126 @@ class PrecitecData:
             metadata["Signal"] = cls._decode_signal(metadata)
         return metadata, z, xstep, ystep
 
+    @classmethod
+    def _read_signal_metadata(cls, path: Path) -> dict[str, Any] | None:
+        """Read only metadata needed to identify a signal file."""
+        match path.suffix.lower():
+            case ".csv":
+                metadata = cls._read_csv_metadata(path)
+            case ".bcrf":
+                metadata = cls._read_bcrf_header(path)
+            case ".txt":
+                return None
+            case _:
+                raise NotImplementedError(
+                    f"Only .csv, .bcrf, and .txt exports are supported, got '{path.suffix}'. "
+                    "The MountainsMap .mnt format stores its surface data in an "
+                    "undocumented, proprietary binary blob."
+                )
+
+        metadata["Signal"] = cls._decode_signal(metadata)
+        return metadata
 
     @classmethod
-    def find_file_pairs(cls,filepaths:list[Path]) -> list[tuple[Path, Path]]:
+    def find_file_pairs(cls, filepaths: list[Path]) -> list[tuple[Path, Path]]:
         """
-        Given a list of filepaths identify the altitude/intensity file pairs and 
+        Given a list of filepaths identify the altitude/intensity file pairs and
         create a list of (altitude_path, intensity_path) tuples from them.
-        
+
         File pairs are identified by having the same base name when ignoring the altitude or intensity suffixes.
         For example:
             - "measurement1_altitude.csv" and "measurement1_intensity.csv".
             - "measurement2_100khz_altitude.bcrf" and "measurement2_intensity_100khz.bcrf".
-        
+
         altitude or intensity suffixes are case-insensitive.
         Raises:
             - finds multiple altitude or intensity files for the same base name (happens if filepaths contains both .csv and .bcrf for the same measurement).
             - finds any altitude file without a corresponding intensity file, or vice versa.
             - finds a file named with altitude or intensity but the metadata indicates the opposite signal type.
         """
-        altitude_files, intensity_files = {},{}
-        
+        altitude_files, intensity_files = {}, {}
+
         files = [Path(f) for f in filepaths if Path(f).is_file()]
         for file in files:
             # Extract base name by removing altitude/intensity suffix (case-insensitive)
             stem = file.stem
             stem_lower = stem.lower()
-            
+
             if "_altitude" in stem_lower:
                 idx = stem_lower.index("_altitude")
-                base_name = stem[:idx] + stem[idx + len("_altitude"):]
+                base_name = stem[:idx] + stem[idx + len("_altitude") :]
                 signal_type = "altitude"
             elif "_intensity" in stem_lower:
                 idx = stem_lower.index("_intensity")
-                base_name = stem[:idx] + stem[idx + len("_intensity"):]
+                base_name = stem[:idx] + stem[idx + len("_intensity") :]
                 signal_type = "intensity"
             else:
-                raise ValueError(f"File '{file.name}' missing '_altitude' or '_intensity' in name.")
-            
+                raise ValueError(
+                    f"File '{file.name}' missing '_altitude' or '_intensity' in name."
+                )
+
             # Verify metadata matches filename
-            metadata, _, _, _ = cls._parse(file)
-            if metadata is not None: #metadata can be None for .txt files
+            metadata = cls._read_signal_metadata(file)
+            if metadata is not None:  # metadata can be None for .txt files
                 actual_signal = metadata.get("Signal")
                 if actual_signal != signal_type:
                     raise ValueError(
                         f"File '{file.name}': filename indicates {signal_type} "
                         f"but metadata indicates {actual_signal}."
                     )
-            
+
             # Store in appropriate dict
-            target_dict = altitude_files if signal_type == "altitude" else intensity_files
+            target_dict = (
+                altitude_files if signal_type == "altitude" else intensity_files
+            )
             if base_name in target_dict:
                 raise ValueError(
                     f"Duplicate {signal_type} file for base name '{base_name}'. "
                     f"You probably provided both .csv and .bcrf for the same measurement."
                 )
             target_dict[base_name] = file
-        
+
         # Validate pairing
         altitude_keys = set(altitude_files.keys())
         intensity_keys = set(intensity_files.keys())
-        
+
         missing_intensity = altitude_keys - intensity_keys
         missing_altitude = intensity_keys - altitude_keys
-        
-        if missing_intensity:
-            raise ValueError(f"Missing intensity files for: {', '.join(sorted(missing_intensity))}.")
-        if missing_altitude:
-            raise ValueError(f"Missing altitude files for: {', '.join(sorted(missing_altitude))}.")
-        return [(altitude_files[key], intensity_files[key]) for key in sorted(altitude_keys)]
 
+        if missing_intensity:
+            raise ValueError(
+                f"Missing intensity files for: {', '.join(sorted(missing_intensity))}."
+            )
+        if missing_altitude:
+            raise ValueError(
+                f"Missing altitude files for: {', '.join(sorted(missing_altitude))}."
+            )
+        return [
+            (altitude_files[key], intensity_files[key]) for key in sorted(altitude_keys)
+        ]
 
     @classmethod
-    def from_file_pairs(cls, file_pairs: list[tuple[Path,Path]]) -> list[PrecitecData]:
+    def from_file_pairs(cls, file_pairs: list[tuple[Path, Path]]) -> list[PrecitecData]:
         """
         Given a list of (altitude_path, intensity_path) tuples, create a list of PrecitecData objects from them.
         """
         return [cls(altitude, intensity) for altitude, intensity in file_pairs]
 
     @classmethod
-    def from_folder(cls, folder: Path, filetype: Literal["csv", "bcrf"]) -> list[PrecitecData]:
+    def from_folder(
+        cls, folder: Path, filetype: Literal["csv", "bcrf"]
+    ) -> list[PrecitecData]:
         """
         Given a folder, identify the file pairs of the given filetype in it.
         Then create a list of PrecitecData objects from them.
         """
-        file_pairs= cls.find_file_pairs(folder, filetype)
-        return [cls(altitude, intensity) for altitude, intensity in file_pairs]
+        suffix = f".{filetype.lower()}"
+        filepaths = [
+            path
+            for path in folder.iterdir()
+            if path.is_file() and path.suffix.lower() == suffix
+        ]
+        return cls.from_file_pairs(cls.find_file_pairs(filepaths))
 
     def __repr__(self) -> str:
         return (
@@ -272,7 +378,8 @@ class PrecitecData:
             while (line := f.readline().strip()) != "":
                 lines.append(line)
         return {
-            parts[0]: _convert_value(parts[1]) if len(parts) == 2
+            parts[0]: _convert_value(parts[1])
+            if len(parts) == 2
             else np.array([_convert_value(v) for v in parts[1:]])
             for parts in (line.split(";") for line in lines)
         }
@@ -299,8 +406,12 @@ class PrecitecData:
         if int(metadata.get("NumberOfLines", 1)) > 1:
             df = cls._stitch_lines(df, metadata)
 
-        return metadata, df.to_numpy().T, float(metadata["XStep"]), float(metadata["YStep"])
-
+        return (
+            metadata,
+            df.to_numpy().T,
+            float(metadata["XStep"]),
+            float(metadata["YStep"]),
+        )
 
     @staticmethod
     def _parse_txt(path: Path) -> tuple[None, np.ndarray, float, float]:
@@ -316,14 +427,14 @@ class PrecitecData:
             skiprows=1,
             usecols=[0, 1, 2],
             decimal=",",
-            encoding="utf-16"
+            encoding="utf-16",
         )
         if [column.strip().upper() for column in data.columns] != ["X", "Y", "Z"]:
             raise ValueError(f"Text export '{path}' must have X, Y and Z columns.")
         data = data.astype(float)
         if data.empty:
             raise ValueError(f"Text export '{path}' contains no XYZ data points.")
-        #convert data to µm (from mm)
+        # convert data to µm (from mm)
         data["X"] *= 1000
         data["Y"] *= 1000
         data["Z"] *= 1000
@@ -331,7 +442,9 @@ class PrecitecData:
         y_values = np.array(sorted(set(data["Y"].values)))
 
         if len(x_values) < 2 or len(y_values) < 2:
-            raise ValueError("Text export must contain at least two X and Y coordinates.")
+            raise ValueError(
+                "Text export must contain at least two X and Y coordinates."
+            )
 
         x_differences = np.diff(x_values)
         y_differences = np.diff(y_values)
@@ -340,29 +453,34 @@ class PrecitecData:
         xstep = float(np.median(x_differences))
         ystep = float(np.median(y_differences))
 
-        #TODO: not the best way to check for a regular grid, but it works for now
+        # TODO: not the best way to check for a regular grid, but it works for now
         # Explicit, sane tolerances instead of relying on set()-based "equality"
         atol = 1
         rtol = 0
 
-        if not np.allclose(x_differences, xstep, rtol=rtol, atol=atol) or \
-        not np.allclose(y_differences, ystep, rtol=rtol, atol=atol):
+        if not np.allclose(
+            x_differences, xstep, rtol=rtol, atol=atol
+        ) or not np.allclose(y_differences, ystep, rtol=rtol, atol=atol):
             print(f"{x_differences=}, {y_differences=}")
             raise ValueError("Text export coordinates do not form a regular grid.")
 
         try:
-            z = data.pivot(index="Y", columns="X", values="Z").reindex(
-                index=y_values, columns=x_values
-            ).to_numpy()
+            z = (
+                data.pivot(index="Y", columns="X", values="Z")
+                .reindex(index=y_values, columns=x_values)
+                .to_numpy()
+            )
         except ValueError as exc:
-            raise ValueError(f"Text export '{path}' contains duplicate XY points.") from exc
+            raise ValueError(
+                f"Text export '{path}' contains duplicate XY points."
+            ) from exc
         if np.isnan(z).any():
-            raise ValueError("Text export does not contain a complete rectangular grid.")
+            raise ValueError(
+                "Text export does not contain a complete rectangular grid."
+            )
 
         return None, z, xstep, ystep
 
-                                        
-                
     @staticmethod
     def _stitch_lines(df: pd.DataFrame, metadata: dict[str, Any]) -> pd.DataFrame:
         """Join separately-scanned channel tiles into one full-width surface."""
@@ -399,7 +517,9 @@ class PrecitecData:
         ypixels = int(fields["ypixels"])
         dtype = "<f4" if fields.get("intelmode", 1) else ">f4"
 
-        z = np.frombuffer(path.read_bytes()[header_bytes:], dtype=dtype).reshape(ypixels, xpixels).copy()
+        with path.open("rb") as file:
+            file.seek(header_bytes)
+            z = np.fromfile(file, dtype=dtype).reshape(ypixels, xpixels)
 
         um_per_unit = {"mm": _UM_PER_MM, "um": 1.0, "nm": 1e-3}
         xstep = float(fields["xlength"]) * um_per_unit[fields["xunit"]] / xpixels
@@ -416,7 +536,11 @@ class PrecitecData:
         else:
             raise KeyError("Signal must be 'altitude' or 'intensity'.")
 
-    def to_surface(self, signal:Literal["altitude", "intensity"],fill_nonmeasured: bool = True, ) -> Surface:
+    def to_surface(
+        self,
+        signal: Literal["altitude", "intensity"],
+        fill_nonmeasured: bool = True,
+    ) -> Surface:
         """Convert the altitude or intensity data to a surfalize Surface.
 
         signal: whether to use the altitude or intensity surface
@@ -429,7 +553,9 @@ class PrecitecData:
         """
         z = self.signal_data(signal).astype(float)
         z[self.nonmeasured] = np.nan
-        metadata = self.metadata_altitude if signal == "altitude" else self.metadata_intensity
+        metadata = (
+            self.metadata_altitude if signal == "altitude" else self.metadata_intensity
+        )
 
         surface = Surface(z, self.xstep, self.ystep, metadata=metadata)
         if fill_nonmeasured and surface.has_missing_points:

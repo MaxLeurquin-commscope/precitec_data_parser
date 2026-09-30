@@ -3,7 +3,7 @@
 from .data_parser import PrecitecData
 from .topology_analyser import PrecitecSurfaceAnalyzer
 
-__version__ = "0.1.1"
+__version__ = "0.3.13"
 __author__ = "Maxime Leurquin"
 
 __all__ = [

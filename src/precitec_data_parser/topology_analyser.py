@@ -292,7 +292,7 @@ class PrecitecSurfaceAnalyzer:
         self, savepath: str | Path | None = None, show: bool = False, **kwargs
     ) -> go.Figure:
         """Build an interactive 3D surface plot of the signal, optionally saving it to an HTML file."""
-        height_data = self.data.signal_data(self.signal)
+        height_data = self.data.get_signal_data(self.signal)
         fig = go.Figure(data=[go.Surface(x=self.data.x, y=self.data.y, z=height_data)])
         fig.update_layout(title=dict(text="Height data"))
         if savepath is not None:
@@ -395,8 +395,9 @@ class PrecitecSurfaceAnalyzer:
         raw_trace = go.Scatter(
             x=x_profile,
             y=profile.data,
-            mode="lines",
+            mode="lines+markers",
             line=dict(color="black", width=1),
+            marker=dict(size=4),
             name="raw",
         )
         if show_2d:

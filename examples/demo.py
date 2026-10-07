@@ -6,6 +6,7 @@ to point to your Precitec measurement file.
 
 Run with: python examples/demo.py
 """
+
 import sys
 from pathlib import Path
 
@@ -18,17 +19,18 @@ from precitec_data_parser import PrecitecData, PrecitecSurfaceAnalyzer
 
 if __name__ == "__main__":
     # Update these paths to your Precitec measurement pair (.csv or .bcrf)
-    altitude_path = rf"precitec_data_parser\tests\sample_data\dummy_Altitude_Peak_Processed.csv"
-    intensity_path = rf"precitec_data_parser\tests\sample_data\dummy_Intensity_Peak_Processed.csv"
+    sample_dir = Path(__file__).parents[1] / "tests" / "sample_data"
+    altitude_path = sample_dir / "dummy_Altitude_Peak_Processed.csv"
+    intensity_path = sample_dir / "dummy_Intensity_Peak_Processed.csv"
 
     data = PrecitecData(altitude_path, intensity_path)
     print("=== Altitude Metadata ===")
     print(data.metadata_altitude)
-    
+
     print("\n=== Intensity Metadata ===")
     print(data.metadata_intensity)
 
-    print(f"Available signals: {[k for k, v in data.signals.items() if v is not None]}")
+    print(f"Measurement shape: {data.altitude.shape}")
 
     analyzer = PrecitecSurfaceAnalyzer(data, level=True)
 
@@ -41,7 +43,7 @@ if __name__ == "__main__":
 
     # Extract profiles at different positions
     y_pos = data.y[len(data.y) // 2]
-    x_pos= data.x[len(data.x) // 2] 
+    x_pos = data.x[len(data.x) // 2]
     print(f"\n=== Extracting profiles at y={y_pos:.2f} µm and x={x_pos:.2f} µm ===")
     profile_y = analyzer.horizontal_profile(y=y_pos)
     profile_x = analyzer.vertical_profile(x=x_pos)

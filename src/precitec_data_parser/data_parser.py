@@ -93,89 +93,105 @@ class PrecitecData:
         self.y = np.arange(n_channels) * ystep
 
     @overload
-    def threshold_data(
-        self, thresh: float, *, inplace: Literal[True] = True
-    ) -> None: ...
-
-    @overload
-    def threshold_data(
-        self, thresh: float, *, inplace: Literal[False]
+    def threshold_intensity(
+        self, minimum: float, *, inplace: Literal[False] = False
     ) -> PrecitecData: ...
 
-    def threshold_data(
-        self, thresh: float, *, inplace: bool = True
+    @overload
+    def threshold_intensity(
+        self, minimum: float, *, inplace: Literal[True]
+    ) -> None: ...
+
+    def threshold_intensity(
+        self, minimum: float, *, inplace: bool = False
     ) -> PrecitecData | None:
-        """Mask points whose intensity is below ``thresh``.
+        """Mask points whose intensity is below ``minimum``.
 
         Thresholded points are set to ``NaN`` in both signals and added to the
         shared non-measured mask. Existing non-measured points remain masked.
 
-        By default this modifies the current object and returns ``None``. Set
-        ``inplace=False`` to return an independently modified copy.
+        By default this returns an independently modified copy. Set
+        ``inplace=True`` to modify the current object and return ``None``.
         """
         if not inplace:
             thresholded = self.copy()
-            thresholded.threshold_data(thresh)
+            thresholded.threshold_intensity(minimum, inplace=True)
             return thresholded
 
         pixels_before = (~self.nonmeasured).sum()
-        threshold_mask = self.intensity < thresh
+        threshold_mask = self.intensity < minimum
         self.altitude[threshold_mask] = np.nan
         self.intensity[threshold_mask] = np.nan
         self.nonmeasured[threshold_mask] = True
         pixels_after = (~self.nonmeasured).sum()
         pixels_removed = pixels_before - pixels_after
+        removed_percentage = (
+            100 * pixels_removed / pixels_before if pixels_before else 0.0
+        )
         logger.debug(
-            f"Thresholding at {thresh}: removed {pixels_removed} pixels "
-            f"({100 * pixels_removed / pixels_before:.1f}%)"
+            "Thresholding at %s: removed %d pixels (%.1f%%)",
+            minimum,
+            pixels_removed,
+            removed_percentage,
         )
         return
 
-    @overload
-    def transpose(self, *, inplace: Literal[True] = True) -> None: ...
 
     @overload
-    def transpose(self, *, inplace: Literal[False]) -> PrecitecData: ...
+    def reorient(
+        self,
+        *,
+        swap_axes: bool = False,
+        flip_x: bool = False,
+        flip_y: bool = False,
+        inplace: Literal[False] = False,
+    ) -> PrecitecData: ...
 
-    def transpose(self, *, inplace: bool = True) -> PrecitecData | None:
-        """Swap x/y axes
+    @overload
+    def reorient(
+        self,
+        *,
+        swap_axes: bool = False,
+        flip_x: bool = False,
+        flip_y: bool = False,
+        inplace: Literal[True],
+    ) -> None: ...
 
-        By default this modifies the current object and returns ``None``. Set
-        ``inplace=False`` to return an independently transposed copy.
+    def reorient(
+        self,
+        *,
+        swap_axes: bool = False,
+        flip_x: bool = False,
+        flip_y: bool = False,
+        inplace: bool = False,
+    ) -> PrecitecData | None:
+        """Swap and mirror spatial axes while keeping coordinates ascending.
+
+        Axis swapping is applied before flips. By default an independent copy
+        is returned; set ``inplace=True`` to mutate this object.
         """
-        if not inplace:
-            transposed = self.copy()
-            transposed.transpose()
-            return transposed
-
-        self.altitude = self.altitude.T
-        self.intensity = self.intensity.T
-        self.nonmeasured = self.nonmeasured.T
-        self.x, self.y = self.y, self.x
-        self.xstep, self.ystep = self.ystep, self.xstep
-        logger.debug("Data transposed: x/y axes swapped")
-
-    @overload
-    def flip_x(self, *, inplace: Literal[True] = True) -> None: ...
-
-    @overload
-    def flip_x(self, *, inplace: Literal[False]) -> PrecitecData: ...
-
-    def flip_x(self, *, inplace: bool = True) -> PrecitecData | None:
-        """Mirror data across x while keeping coordinates ascending.
-
-        By default this modifies the current object and returns ``None``. Set
-        ``inplace=False`` to return an independently flipped copy.
-        """
-        if not inplace:
-            flipped = self.copy()
-            flipped.flip_x()
-            return flipped
-
-        self.altitude = self.altitude[:, ::-1].copy()
-        self.intensity = self.intensity[:, ::-1].copy()
-        self.nonmeasured = self.nonmeasured[:, ::-1].copy()
-        logger.debug("Measurement data flipped along x; coordinates remain ascending")
+        target = self if inplace else self.copy()
+        if swap_axes:
+            target.altitude = target.altitude.T
+            target.intensity = target.intensity.T
+            target.nonmeasured = target.nonmeasured.T
+            target.x, target.y = target.y, target.x
+            target.xstep, target.ystep = target.ystep, target.xstep
+        if flip_x:
+            target.altitude = target.altitude[:, ::-1]
+            target.intensity = target.intensity[:, ::-1]
+            target.nonmeasured = target.nonmeasured[:, ::-1]
+        if flip_y:
+            target.altitude = target.altitude[::-1, :]
+            target.intensity = target.intensity[::-1, :]
+            target.nonmeasured = target.nonmeasured[::-1, :]
+        logger.debug(
+            "Reoriented measurement: swap_axes=%s flip_x=%s flip_y=%s",
+            swap_axes,
+            flip_x,
+            flip_y,
+        )
+        return None if inplace else target
 
     def copy(self) -> "PrecitecData":
         """Create an independent copy of this PrecitecData object.
@@ -526,7 +542,7 @@ class PrecitecData:
         ystep = float(fields["ylength"]) * um_per_unit[fields["yunit"]] / ypixels
         return fields, z, xstep, ystep
 
-    def signal_data(self, signal: Literal["altitude", "intensity"]) -> np.ndarray:
+    def get_signal_data(self, signal: Literal["altitude", "intensity"]) -> np.ndarray:
         """Return the altitude or intensity matrix."""
         signal_lower = signal.strip().lower()
         if signal_lower == "altitude":
@@ -534,7 +550,7 @@ class PrecitecData:
         elif signal_lower == "intensity":
             return self.intensity
         else:
-            raise KeyError("Signal must be 'altitude' or 'intensity'.")
+            raise ValueError("Signal must be 'altitude' or 'intensity'.")
 
     def to_surface(
         self,
@@ -551,7 +567,7 @@ class PrecitecData:
         enable it for areal roughness/height parameters, leave it off to keep
         the holes empty when plotting.
         """
-        z = self.signal_data(signal).astype(float)
+        z = self.get_signal_data(signal).astype(float)
         z[self.nonmeasured] = np.nan
         metadata = (
             self.metadata_altitude if signal == "altitude" else self.metadata_intensity

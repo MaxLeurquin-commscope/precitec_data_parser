@@ -1,4 +1,5 @@
 from unittest.mock import Mock
+from types import SimpleNamespace
 
 import numpy as np
 from scipy import ndimage
@@ -7,12 +8,28 @@ from surfalize import Surface
 from precitec_data_parser import PrecitecSurfaceAnalyzer
 
 
+def test_plot_profile_shows_connected_measurement_markers() -> None:
+    analyzer = object.__new__(PrecitecSurfaceAnalyzer)
+    analyzer.signal = "altitude"
+    samples = np.array([1.0, 3.0, 2.0])
+
+    figure = analyzer.plot_profile(
+        SimpleNamespace(data=samples, length_um=2.0), show_2d=False
+    )
+
+    raw_trace = figure.data[0]
+    assert raw_trace.mode == "lines+markers"
+    assert raw_trace.marker.size == 4
+    np.testing.assert_array_equal(raw_trace.x, [0.0, 1.0, 2.0])
+    np.testing.assert_array_equal(raw_trace.y, samples)
+
+
 def test_plot_3d_uses_signal_data_api() -> None:
     height_data = np.array([[1.0, 2.0], [3.0, 4.0]])
     data = Mock()
     data.x = np.array([0.0, 1.0])
     data.y = np.array([0.0, 1.0])
-    data.signal_data.return_value = height_data
+    data.get_signal_data.return_value = height_data
 
     analyzer = object.__new__(PrecitecSurfaceAnalyzer)
     analyzer.data = data
@@ -20,7 +37,7 @@ def test_plot_3d_uses_signal_data_api() -> None:
 
     figure = analyzer.plot_3d()
 
-    data.signal_data.assert_called_once_with("altitude")
+    data.get_signal_data.assert_called_once_with("altitude")
     np.testing.assert_array_equal(figure.data[0].z, height_data)
 
 

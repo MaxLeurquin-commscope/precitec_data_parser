@@ -112,10 +112,10 @@ def test_parse_bcrf_reads_binary_surface_into_owned_array(
     assert ystep == 2.0
 
 
-def test_threshold_data_copy_mode_returns_independent_data() -> None:
+def test_threshold_intensity_returns_independent_data_by_default() -> None:
     original = make_data()
 
-    thresholded = original.threshold_data(30.0, inplace=False)
+    thresholded = original.threshold_intensity(30.0)
 
     expected_mask = np.array([[True, False, False], [False, True, False]], dtype=bool)
     np.testing.assert_array_equal(thresholded.nonmeasured, expected_mask)
@@ -138,9 +138,9 @@ def test_threshold_data_copy_mode_returns_independent_data() -> None:
     assert thresholded.metadata_intensity is not original.metadata_intensity
 
 
-def test_threshold_data_supports_inplace_and_copy_modes() -> None:
+def test_threshold_intensity_supports_inplace_and_copy_modes() -> None:
     original = make_data()
-    result = original.threshold_data(30.0)
+    result = original.threshold_intensity(30.0, inplace=True)
 
     assert result is None
     np.testing.assert_array_equal(
@@ -149,7 +149,7 @@ def test_threshold_data_supports_inplace_and_copy_modes() -> None:
     )
 
     original = make_data()
-    thresholded = original.threshold_data(30.0, inplace=False)
+    thresholded = original.threshold_intensity(30.0)
 
     assert thresholded is not None
     assert thresholded is not original
@@ -164,10 +164,10 @@ def test_threshold_data_supports_inplace_and_copy_modes() -> None:
     )
 
 
-def test_transpose_copy_mode_swaps_geometry_without_mutating_original() -> None:
+def test_reorient_swaps_geometry_without_mutating_original() -> None:
     original = make_data()
 
-    transposed = original.transpose(inplace=False)
+    transposed = original.reorient(swap_axes=True)
 
     np.testing.assert_array_equal(transposed.altitude, original.altitude.T)
     np.testing.assert_array_equal(transposed.intensity, original.intensity.T)
@@ -184,9 +184,9 @@ def test_transpose_copy_mode_swaps_geometry_without_mutating_original() -> None:
     assert original.ystep == 5.0
 
 
-def test_transpose_supports_inplace_and_copy_modes() -> None:
+def test_reorient_supports_inplace_and_copy_modes() -> None:
     original = make_data()
-    result = original.transpose()
+    result = original.reorient(swap_axes=True, inplace=True)
 
     assert result is None
     np.testing.assert_array_equal(original.altitude, make_data().altitude.T)
@@ -196,7 +196,7 @@ def test_transpose_supports_inplace_and_copy_modes() -> None:
     assert original.ystep == 2.0
 
     original = make_data()
-    transposed = original.transpose(inplace=False)
+    transposed = original.reorient(swap_axes=True)
 
     assert transposed is not None
     assert transposed is not original
@@ -204,10 +204,10 @@ def test_transpose_supports_inplace_and_copy_modes() -> None:
     np.testing.assert_array_equal(original.altitude, make_data().altitude)
 
 
-def test_flip_x_copy_mode_mirrors_arrays_and_keeps_coordinates_ascending() -> None:
+def test_reorient_flip_x_mirrors_arrays_and_keeps_coordinates_ascending() -> None:
     original = make_data()
 
-    flipped = original.flip_x(inplace=False)
+    flipped = original.reorient(flip_x=True)
 
     np.testing.assert_array_equal(flipped.altitude, original.altitude[:, ::-1])
     np.testing.assert_array_equal(flipped.intensity, original.intensity[:, ::-1])
@@ -216,19 +216,35 @@ def test_flip_x_copy_mode_mirrors_arrays_and_keeps_coordinates_ascending() -> No
     np.testing.assert_array_equal(original.altitude, make_data().altitude)
 
 
-def test_flip_x_supports_inplace_and_copy_modes() -> None:
+def test_reorient_flip_x_supports_inplace_and_copy_modes() -> None:
     original = make_data()
-    result = original.flip_x()
+    result = original.reorient(flip_x=True, inplace=True)
 
     assert result is None
     np.testing.assert_array_equal(original.altitude, make_data().altitude[:, ::-1])
     np.testing.assert_array_equal(original.x, make_data().x)
 
     original = make_data()
-    flipped = original.flip_x(inplace=False)
+    flipped = original.reorient(flip_x=True)
 
     assert flipped is not None
     assert flipped is not original
     np.testing.assert_array_equal(flipped.altitude, original.altitude[:, ::-1])
     np.testing.assert_array_equal(flipped.x, original.x)
     np.testing.assert_array_equal(original.altitude, make_data().altitude)
+
+
+def test_reorient_can_swap_and_flip_both_axes_in_one_copy() -> None:
+    original = make_data()
+
+    transformed = original.reorient(swap_axes=True, flip_x=True, flip_y=True)
+
+    np.testing.assert_array_equal(transformed.altitude, original.altitude.T[::-1, ::-1])
+    np.testing.assert_array_equal(transformed.x, original.y)
+    np.testing.assert_array_equal(transformed.y, original.x)
+    np.testing.assert_array_equal(original.altitude, make_data().altitude)
+
+
+def test_get_signal_data_rejects_unknown_signal() -> None:
+    with np.testing.assert_raises(ValueError):
+        make_data().get_signal_data("unknown")  # type: ignore[arg-type]
